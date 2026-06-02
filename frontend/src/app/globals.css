@@ -1,0 +1,264 @@
+/* ============================================================
+   globals.css — Tailwind v4 syntax (no @apply version)
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap');
+
+@import "tailwindcss";
+
+:root {
+  /* IG Brand Colors */
+  --ig-pink:   #E1306C;
+  --ig-purple: #833AB4;
+  --ig-orange: #F77737;
+  --ig-yellow: #FCAF45;
+  --ig-blue:   #405DE6;
+
+  /* Glassmorphism tokens */
+  --glass-bg:      rgba(255, 255, 255, 0.04);
+  --glass-border:  rgba(255, 255, 255, 0.08);
+  --glass-hover:   rgba(255, 255, 255, 0.07);
+  --glass-active:  rgba(255, 255, 255, 0.10);
+  --glass-strong:  rgba(255, 255, 255, 0.06);
+
+  /* Surface colors */
+  --surface-0:  #0A0A0F;
+  --surface-1:  #12121A;
+  --surface-2:  #1A1A25;
+  --surface-3:  #222230;
+
+  /* Text */
+  --text-primary:   rgba(255,255,255,0.95);
+  --text-secondary: rgba(255,255,255,0.60);
+  --text-muted:     rgba(255,255,255,0.35);
+
+  /* IG gradient */
+  --ig-grad: linear-gradient(135deg, #405DE6, #5851DB, #833AB4, #C13584, #E1306C, #F56040, #FCAF45);
+  --ig-grad-soft: linear-gradient(135deg, #405DE615, #833AB415, #E1306C15);
+
+  --font-display: 'Syne', system-ui;
+  --font-body: 'DM Sans', system-ui;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── SCROLLBAR ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface-1); }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(var(--ig-pink), var(--ig-purple));
+  border-radius: 3px;
+}
+
+/* ── GLASS UTILITY CLASSES ─────────────────────────────────── */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+.glass-strong {
+  background: var(--glass-strong);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10);
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+  border-radius: 1rem;
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}
+
+.glass-card:hover {
+  background: var(--glass-hover);
+  border-color: rgba(255,255,255,0.14);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);
+  transform: translateY(-2px);
+}
+
+.ig-text {
+  background: var(--ig-grad);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.ig-border {
+  border-image: var(--ig-grad) 1;
+}
+
+.ig-glow {
+  box-shadow: 0 0 20px rgba(225,48,108,0.3), 0 0 60px rgba(131,58,180,0.15);
+}
+
+.btn-ig {
+  background: var(--ig-grad);
+  background-size: 200% 200%;
+  color: white;
+  font-weight: 600;
+  border-radius: 12px;
+  padding: 0.625rem 1.5rem;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-ig::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.15);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.btn-ig:hover::before { opacity: 1; }
+.btn-ig:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(225,48,108,0.4); }
+.btn-ig:active { transform: translateY(0); }
+
+.btn-glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+  border-radius: 0.75rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
+  font-weight: 500;
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+  color: var(--text-primary);
+}
+
+.btn-glass:hover {
+  background: var(--glass-hover);
+  border-color: rgba(255,255,255,0.18);
+  transform: translateY(-1px);
+}
+
+.input-glass {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  color: var(--text-primary);
+  padding: 0.625rem 1rem;
+  width: 100%;
+  font-family: var(--font-body);
+  transition: all 0.2s;
+  outline: none;
+}
+
+.input-glass::placeholder { color: var(--text-muted); }
+
+.input-glass:focus {
+  border-color: var(--ig-pink);
+  box-shadow: 0 0 0 3px rgba(225,48,108,0.15);
+  background: rgba(255,255,255,0.06);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.badge-positive  { background: rgba(34,197,94,0.15);  color: #4ade80; border: 1px solid rgba(34,197,94,0.25); }
+.badge-negative  { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+.badge-hate      { background: rgba(220,38,38,0.2);   color: #fca5a5; border: 1px solid rgba(220,38,38,0.35); }
+.badge-toxic     { background: rgba(234,179,8,0.15);  color: #fde047; border: 1px solid rgba(234,179,8,0.25); }
+.badge-neutral   { background: rgba(148,163,184,0.12);color: #94a3b8; border: 1px solid rgba(148,163,184,0.2); }
+.badge-humor     { background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.25); }
+
+/* ── BACKGROUND MESH ────────────────────────────────────────── */
+.bg-mesh {
+  background:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(64,93,230,0.15) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 110%, rgba(225,48,108,0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(131,58,180,0.06) 0%, transparent 70%),
+    var(--surface-0);
+}
+
+/* ── ANIMATED GRADIENT BORDER ───────────────────────────────── */
+.gradient-border {
+  position: relative;
+}
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--ig-grad);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0.6;
+}
+
+/* ── SHIMMER SKELETON ───────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.08) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── STAT NUMBER ANIMATION ──────────────────────────────────── */
+.stat-num {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+/* ── PROGRESS BAR ───────────────────────────────────────────── */
+.progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s cubic-bezier(0.25,0.46,0.45,0.94);
+}

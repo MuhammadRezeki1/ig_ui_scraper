@@ -1,0 +1,33 @@
+# Dependencies & build output
+node_modules
+.next
+out
+
+# Environment
+.env
+.env*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+*.log
+
+# IDE
+.vscode
+.idea
+
+# Git
+.git
+.gitignore
+
+# Misc
+README.md
+AGENTS.md
+CLAUDE.md
+*.md
+.DS_Store
+coverage
+.turbo
+run-all.bat
+settings.json
+css_custom_data.json

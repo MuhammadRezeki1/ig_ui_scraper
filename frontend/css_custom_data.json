@@ -1,0 +1,13 @@
+{
+  "version": 1.1,
+  "atDirectives": [
+    { "name": "@tailwind", "description": "Tailwind CSS directive" },
+    { "name": "@apply", "description": "Apply utility classes" },
+    { "name": "@layer", "description": "Define custom layers" },
+    { "name": "@config", "description": "Tailwind config path" },
+    { "name": "@theme", "description": "Tailwind v4 theme definition" },
+    { "name": "@source", "description": "Tailwind content source" },
+    { "name": "@utility", "description": "Custom utility definition" },
+    { "name": "@variant", "description": "Custom variant definition" }
+  ]
+}
