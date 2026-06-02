@@ -1,0 +1,38 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment (WAJIB exclude, kalau enggak image jadi 2GB+)
+.venv
+venv
+env
+
+# Environment & secrets (JANGAN masuk image yang di-push publik!)
+.env
+.env.local
+.env.*.local
+
+# Session login Instagram & data hasil scraping (BAHAYA kalau ke-push publik)
+session/
+data/
+
+# IDE & tooling
+.vscode
+.idea
+pyrightconfig.json
+*.log
+
+# Test & cache
+.pytest_cache
+.mypy_cache
+
+# Git
+.git
+.gitignore
+
+# Misc
+README.md
+*.md
+.DS_Store

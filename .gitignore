@@ -1,0 +1,33 @@
+# Python
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+
+# Session
+backend/session/
+
+# Output scraping
+backend/engine/output/
+
+# Playwright Chrome Profile
+backend/engine/chrome_profile_playwright/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# Environment
+.env
+.env.local
+frontend/.env.local
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+
+# Chrome profile (Selenium - bukan Playwright)
+backend/engine/chrome_profile/

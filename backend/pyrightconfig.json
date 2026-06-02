@@ -1,0 +1,6 @@
+{
+  "extraPaths": ["./engine"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "reportMissingImports": "warning"
+}
