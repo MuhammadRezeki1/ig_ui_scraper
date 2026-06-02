@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, Link2, Loader2, AlertCircle, ChevronDown, ChevronUp, Plus, Trash2, CheckCircle, XCircle, Clock } from 'lucide-react'
+import {
+  Search, Link2, Loader2, AlertCircle, ChevronDown, ChevronUp,
+  Plus, Trash2, CheckCircle, XCircle, Clock, MessageCircle,
+} from 'lucide-react'
 import { scrapePost, scrapePosts } from '@/lib/api'
-import type { PostResult } from '@/types'
+import type { PostResult, Comment } from '@/types'
 import { StatCard } from '@/components/ui/StatCard'
 import { SentimentChart } from '@/components/features/SentimentChart'
 import { CommentList } from '@/components/features/CommentList'
@@ -13,7 +16,6 @@ import { scrapeStore } from '@/lib/scrapeStore'
 
 type Mode = 'single' | 'batch'
 
-// Satu entri hasil batch dari backend: { url, success, data?, error? }
 interface BatchItem {
   url: string
   success: boolean
@@ -21,7 +23,6 @@ interface BatchItem {
   error?: string
 }
 
-// Hook untuk membaca status scrape global (bertahan lintas navigasi)
 function useScrapeStatus() {
   return useSyncExternalStore(
     scrapeStore.subscribe,
@@ -37,6 +38,11 @@ export default function ScrapePage() {
   const [url, setUrl] = useState('')
   const [batchUrls, setBatchUrls] = useState<string[]>(['', ''])
   const [maxComments, setMaxComments] = useState(100)
+
+  // ── BARU: opsi replies ─────────────────────────────────────
+  const [includeReplies, setIncludeReplies] = useState(true)
+  const [maxRepliesPerComment, setMaxRepliesPerComment] = useState(20)
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [warning, setWarning] = useState('')
@@ -50,11 +56,8 @@ export default function ScrapePage() {
   const [batchSummary, setBatchSummary] = useState<{ total: number; success: number; failed: number } | null>(null)
   const [openComments, setOpenComments] = useState<number | null>(null)
 
-  // Status scrape global (true walau halaman ini baru di-mount ulang)
   const globalBusy = useScrapeStatus()
 
-  // Saat halaman di-mount lagi: kalau ternyata masih ada scrape berjalan
-  // (dimulai sebelum kita pindah halaman), tampilkan peringatan & jangan reset.
   useEffect(() => {
     if (scrapeStore.isBusy()) {
       const st = scrapeStore.get()
@@ -66,8 +69,6 @@ export default function ScrapePage() {
   }, [])
 
   async function handleScrape() {
-    // GUARD 1: tolak kalau ada scrape lain (di halaman ini atau yang masih
-    // berjalan dari sebelum navigasi)
     if (scrapeStore.isBusy()) {
       setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
       return
@@ -85,8 +86,6 @@ export default function ScrapePage() {
     setBatchSummary(null)
     setOpenComments(null)
 
-    // Tandai mulai di store global. begin() return false kalau ternyata
-    // baru saja ada yang mulai (race) -> aman, kita batalkan.
     const label = mode === 'single' ? target : `${validBatch.length} URL`
     if (!scrapeStore.begin(mode, label)) {
       setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
@@ -95,14 +94,19 @@ export default function ScrapePage() {
 
     setLoading(true)
 
+    const opts = {
+      include_replies: includeReplies,
+      max_replies_per_comment: maxRepliesPerComment,
+    }
+
     try {
       if (mode === 'single') {
-        const resp = await scrapePost(target, maxComments)
+        const resp = await scrapePost(target, maxComments, opts)
         if (!resp.success) throw new Error(resp.message)
         setResult(resp.data)
         setShowComments(false)
       } else {
-        const resp = await scrapePosts(validBatch, maxComments)
+        const resp = await scrapePosts(validBatch, maxComments, 8, opts)
         if (!resp.success) throw new Error(resp.message)
 
         const data = resp.data as {
@@ -122,14 +126,16 @@ export default function ScrapePage() {
       setError(e instanceof Error ? e.message : 'Terjadi kesalahan')
     } finally {
       setLoading(false)
-      scrapeStore.finish()   // bebaskan kunci global
+      scrapeStore.finish()
     }
   }
 
   const s = result?.sentiment_summary
-
-  // Apakah tombol harus dinonaktifkan? (loading lokal ATAU busy global)
   const disabled = loading || globalBusy
+
+  // ── Hitung total reply dari semua komentar (kalau backend gak kirim total_replies) ─
+  const totalRepliesFromComments = (comments?: Comment[]) =>
+    (comments || []).reduce((acc, c) => acc + (c.replies?.length || 0), 0)
 
   return (
     <div className="p-8 max-w-5xl">
@@ -140,11 +146,11 @@ export default function ScrapePage() {
           <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
             Scrape Post
           </h1>
-          <p className="text-sm text-white/40">Ambil komentar + analisis sentimen dari Instagram</p>
+          <p className="text-sm text-white/40">Ambil komentar + balasan + analisis sentimen dari Instagram</p>
         </div>
       </div>
 
-      {/* Banner peringatan: proses masih berjalan (mis. setelah navigasi balik) */}
+      {/* Banner peringatan: proses masih berjalan */}
       {globalBusy && !loading && (
         <div className="glass-card p-4 mb-6 flex items-start gap-3 border border-yellow-500/20">
           <Clock size={18} className="text-yellow-400 shrink-0 mt-0.5 animate-pulse" />
@@ -241,9 +247,10 @@ export default function ScrapePage() {
           </div>
         )}
 
-        {/* Max Comments */}
-        <div className="flex items-center gap-4">
-          <div className="flex-1">
+        {/* Max Comments + Replies Options */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {/* Max Comments */}
+          <div>
             <label className="block text-xs text-white/50 mb-2 uppercase tracking-widest">
               Max Komentar: <span className="text-white/80 normal-case">{maxComments}</span>
             </label>
@@ -261,10 +268,54 @@ export default function ScrapePage() {
               <span>10</span><span>50</span><span>100</span>
             </div>
           </div>
+
+          {/* Max Replies per Comment */}
+          <div>
+            <label className="block text-xs text-white/50 mb-2 uppercase tracking-widest">
+              Max Balasan / komentar: <span className="text-white/80 normal-case">{maxRepliesPerComment}</span>
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={50}
+              step={5}
+              value={maxRepliesPerComment}
+              disabled={disabled || !includeReplies}
+              onChange={e => setMaxRepliesPerComment(Number(e.target.value))}
+              className="w-full accent-purple-500 h-1.5 disabled:opacity-30"
+            />
+            <div className="flex justify-between text-[10px] text-white/20 mt-1">
+              <span>0</span><span>25</span><span>50</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Toggle Include Replies + Button */}
+        <div className="flex items-center gap-4">
+          <label
+            className={`flex items-center gap-2 cursor-pointer select-none ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <div className="relative">
+              <input
+                type="checkbox"
+                checked={includeReplies}
+                onChange={e => setIncludeReplies(e.target.checked)}
+                disabled={disabled}
+                className="sr-only peer"
+              />
+              <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-pink-500/60 transition-colors" />
+              <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+            </div>
+            <MessageCircle size={14} className="text-white/40" />
+            <span className="text-xs text-white/70">Sertakan balasan komentar</span>
+          </label>
+
+          <div className="flex-1" />
+
           <button
             onClick={handleScrape}
             disabled={disabled}
-            className="btn-ig flex items-center gap-2 px-6 py-3 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-ig flex items-center gap-2 px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {disabled ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
             {loading ? 'Memproses...' : globalBusy ? 'Menunggu...' : 'Scrape'}
@@ -297,11 +348,15 @@ export default function ScrapePage() {
           </div>
           <p className="text-white/60 text-sm">Sedang scraping Instagram...</p>
           <p className="text-white/30 text-xs mt-1">
-            {mode === 'batch' ? 'Batch bisa makan waktu beberapa menit' : 'Bisa memakan waktu 30-60 detik'}
+            {includeReplies
+              ? 'Mengambil komentar + balasan, bisa makan waktu 1-3 menit'
+              : mode === 'batch'
+                ? 'Batch bisa makan waktu beberapa menit'
+                : 'Bisa memakan waktu 30-60 detik'}
           </p>
           <p className="text-white/30 text-xs mt-1">Jangan pindah halaman agar hasil langsung tampil di sini.</p>
-          <div className="flex justify-center gap-1 mt-4">
-            {['Buka browser', 'Ambil komentar', 'Analisis sentimen'].map((step, i) => (
+          <div className="flex justify-center gap-3 mt-4">
+            {['Buka browser', 'Ambil komentar', ...(includeReplies ? ['Ambil balasan'] : []), 'Analisis sentimen'].map((step, i) => (
               <div key={i} className="flex items-center gap-1 text-xs text-white/30">
                 <div className="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse" style={{ animationDelay: `${i * 0.3}s` }} />
                 {step}
@@ -345,6 +400,13 @@ export default function ScrapePage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard label="Likes"        value={result.likes}        color="pink"   />
             <StatCard label="Komentar"     value={result.comments_count} color="purple" />
+            {(result.replies_count ?? totalRepliesFromComments(result.comments)) > 0 && (
+              <StatCard
+                label="Balasan"
+                value={result.replies_count ?? totalRepliesFromComments(result.comments)}
+                color="blue"
+              />
+            )}
             {result.video_views > 0 && <StatCard label="Video Views" value={result.video_views} color="blue" />}
             {result.saves_count > 0  && <StatCard label="Saves"       value={result.saves_count}  color="orange" />}
             {result.shares_count > 0 && <StatCard label="Shares"      value={result.shares_count} color="yellow" />}
@@ -353,7 +415,9 @@ export default function ScrapePage() {
           {/* Sentiment Summary */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="glass-card p-6">
-              <h3 className="font-semibold mb-4 text-sm uppercase tracking-widest text-white/50">Distribusi Sentimen</h3>
+              <h3 className="font-semibold mb-4 text-sm uppercase tracking-widest text-white/50">
+                Distribusi Sentimen (Parent)
+              </h3>
               <SentimentChart summary={s} />
             </div>
 
@@ -388,6 +452,32 @@ export default function ScrapePage() {
             </div>
           </div>
 
+          {/* Replies Sentiment (kalau ada) */}
+          {s.replies_sentiment_breakdown && (s.total_replies ?? 0) > 0 && (
+            <div className="glass-card p-6">
+              <h3 className="font-semibold mb-4 text-sm uppercase tracking-widest text-white/50">
+                💬 Distribusi Sentimen (Balasan) — total {s.total_replies}
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {[
+                  { label: '😊 Positif',     k: 'positive_percentage',     v: s.replies_sentiment_breakdown.positive_count, color: 'text-emerald-400' },
+                  { label: '😞 Negatif',     k: 'negative_percentage',     v: s.replies_sentiment_breakdown.negative_count, color: 'text-rose-400' },
+                  { label: '😐 Netral',      k: 'neutral_percentage',      v: s.replies_sentiment_breakdown.neutral_count,  color: 'text-white/60' },
+                  { label: '😂 Humor',       k: 'humor_percentage',        v: s.replies_sentiment_breakdown.humor_count,    color: 'text-indigo-400' },
+                  { label: '⚠️ Toxic',       k: 'toxic_percentage',        v: s.replies_sentiment_breakdown.toxic_count,    color: 'text-yellow-400' },
+                  { label: '🚨 Hate',        k: 'hate_percentage',         v: s.replies_sentiment_breakdown.hate_speech_count, color: 'text-red-400' },
+                ].map((item) => (
+                  <div key={item.label} className="glass rounded-xl p-3 text-center">
+                    <p className={`text-base font-bold ${item.color}`}>
+                      {(s.replies_sentiment_breakdown as unknown as Record<string, number>)[item.k]}%
+                    </p>
+                    <p className="text-[11px] text-white/40 mt-0.5">{item.label} ({item.v})</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Top Commented */}
           {s.top_liked?.length > 0 && (
             <div className="glass-card p-6">
@@ -415,7 +505,14 @@ export default function ScrapePage() {
               onClick={() => setShowComments(v => !v)}
               className="w-full flex items-center justify-between font-semibold text-sm"
             >
-              <span>💬 Semua Komentar ({result.comments_count})</span>
+              <span>
+                💬 Semua Komentar ({result.comments_count})
+                {(result.replies_count ?? 0) > 0 && (
+                  <span className="text-white/40 font-normal ml-1">
+                    + {result.replies_count} balasan
+                  </span>
+                )}
+              </span>
               {showComments ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
             </button>
             {showComments && (
@@ -430,7 +527,6 @@ export default function ScrapePage() {
       {/* ============ HASIL BATCH ============ */}
       {batchResults && batchSummary && (
         <div className="space-y-5">
-          {/* Ringkasan batch */}
           <div className="glass-card p-5 flex items-center gap-6">
             <div>
               <p className="text-2xl font-bold ig-text">{batchSummary.success}/{batchSummary.total}</p>
@@ -446,7 +542,6 @@ export default function ScrapePage() {
             )}
           </div>
 
-          {/* Daftar hasil per post */}
           {batchResults.map((item, idx) => {
             const d = item.data
             const ss = d?.sentiment_summary
@@ -464,6 +559,8 @@ export default function ScrapePage() {
                 </div>
               )
             }
+
+            const replyTotal = d.replies_count ?? totalRepliesFromComments(d.comments)
 
             return (
               <div key={idx} className="glass-card p-5 space-y-4">
@@ -495,17 +592,17 @@ export default function ScrapePage() {
                     <p className="text-lg font-bold ig-text">{(d.comments_count || 0).toLocaleString('id-ID')}</p>
                     <p className="text-[11px] text-white/40">Komentar</p>
                   </div>
+                  {replyTotal > 0 && (
+                    <div className="glass rounded-xl p-3 text-center">
+                      <p className="text-lg font-bold text-blue-400">{replyTotal.toLocaleString('id-ID')}</p>
+                      <p className="text-[11px] text-white/40">Balasan</p>
+                    </div>
+                  )}
                   {ss && (
-                    <>
-                      <div className="glass rounded-xl p-3 text-center">
-                        <p className="text-lg font-bold text-emerald-400">{ss.positive_percentage}%</p>
-                        <p className="text-[11px] text-white/40">Positif</p>
-                      </div>
-                      <div className="glass rounded-xl p-3 text-center">
-                        <p className="text-lg font-bold text-red-400">{ss.negative_percentage}%</p>
-                        <p className="text-[11px] text-white/40">Negatif</p>
-                      </div>
-                    </>
+                    <div className="glass rounded-xl p-3 text-center">
+                      <p className="text-lg font-bold text-emerald-400">{ss.positive_percentage}%</p>
+                      <p className="text-[11px] text-white/40">Positif</p>
+                    </div>
                   )}
                 </div>
 
@@ -516,13 +613,12 @@ export default function ScrapePage() {
                   </div>
                 )}
 
-                {/* Top 5 komentar (likes) */}
                 {ss && Array.isArray(ss.top_liked) && ss.top_liked.length > 0 && (
                   <div>
                     <h4 className="text-xs font-medium text-white/50 uppercase tracking-widest mb-2">🔥 Top Komentar (Likes)</h4>
                     <div className="space-y-2">
-                      {ss.top_liked.slice(0, 5).map((c: any, i: number) => (
-                        <div key={i} className="flex gap-3 items-start py-1.5 border-b border-white/[0.04] last:border-0">
+                      {ss.top_liked.slice(0, 5).map((c, i) => (
+                        <div key={i} className="flex gap-3 items-start py-1.5 border-b border-white/4 last:border-0">
                           <span className="text-sm font-bold text-white/20 w-5 shrink-0">#{i + 1}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-medium text-white/80">@{c.username}</p>
@@ -541,7 +637,14 @@ export default function ScrapePage() {
                       onClick={() => setOpenComments(isOpen ? null : idx)}
                       className="w-full flex items-center justify-between text-sm font-medium"
                     >
-                      <span>💬 Semua Komentar ({d.comments_count})</span>
+                      <span>
+                        💬 Semua Komentar ({d.comments_count})
+                        {replyTotal > 0 && (
+                          <span className="text-white/40 font-normal ml-1">
+                            + {replyTotal} balasan
+                          </span>
+                        )}
+                      </span>
                       {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                     </button>
                     {isOpen && (

@@ -2,13 +2,12 @@
 
 import { useState, useEffect, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
-import { Users, Search, Loader2, AlertCircle, Eye, CheckCircle, Clock } from 'lucide-react'
+import { Users, Search, Loader2, AlertCircle, Eye, CheckCircle, Clock, ShieldCheck } from 'lucide-react'
 import { listProfiles, scrapeProfile } from '@/lib/api'
 import type { Profile } from '@/types'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
 import { scrapeStore } from '@/lib/scrapeStore'
 
-// Baca status scrape global (dipakai bersama dengan ScrapePage)
 function useScrapeStatus() {
   return useSyncExternalStore(
     scrapeStore.subscribe,
@@ -28,7 +27,6 @@ export default function ProfilesPage() {
   const [error, setError] = useState('')
   const [warning, setWarning] = useState('')
 
-  // Status scrape global (true walau halaman ini baru di-mount ulang)
   const globalBusy = useScrapeStatus()
 
   useEffect(() => {
@@ -38,8 +36,6 @@ export default function ProfilesPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  // Saat halaman di-mount: kalau masih ada scrape berjalan (dari halaman lain
-  // atau dimulai sebelum navigasi), tampilkan peringatan & jangan reset.
   useEffect(() => {
     if (scrapeStore.isBusy()) {
       const st = scrapeStore.get()
@@ -51,7 +47,6 @@ export default function ProfilesPage() {
   }, [])
 
   async function handleScrape() {
-    // GUARD: tolak kalau ada scrape lain (post / profile / batch) berjalan
     if (scrapeStore.isBusy()) {
       setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
       return
@@ -64,7 +59,6 @@ export default function ProfilesPage() {
     setWarning('')
     setScrapeResult(null)
 
-    // Kunci global. begin() mengembalikan false bila ada yang baru saja mulai.
     if (!scrapeStore.begin('profile', `@${u}`)) {
       setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
       return
@@ -79,28 +73,34 @@ export default function ProfilesPage() {
       if (!prof || !prof.username) {
         throw new Error('Data profile kosong / format tidak dikenali')
       }
-      setScrapeResult(prof)
+      setScrapeResult(prof as Profile)
 
       listProfiles().then(r => { if (r.success) setProfiles(r.data.users) })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Gagal scrape profile')
     } finally {
       setScraping(false)
-      scrapeStore.finish()   // bebaskan kunci global
+      scrapeStore.finish()
     }
   }
 
-  // Nonaktifkan input bila loading lokal ATAU ada scrape lain berjalan
   const disabled = scraping || globalBusy
 
   return (
     <div className="p-8 max-w-5xl">
-      <div className="flex items-center gap-3 mb-8">
+      <div className="flex items-center gap-3 mb-6">
         <IGLogoFilled size={36} />
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Profiles</h1>
           <p className="text-sm text-white/40">Track & analisis akun Instagram</p>
         </div>
+        <button
+          onClick={() => router.push('/main/verified-following')}
+          className="btn-glass text-xs flex items-center gap-1.5"
+        >
+          <ShieldCheck size={14} className="text-blue-400" />
+          Verified Following
+        </button>
       </div>
 
       {/* Banner: scraping lain masih berjalan */}

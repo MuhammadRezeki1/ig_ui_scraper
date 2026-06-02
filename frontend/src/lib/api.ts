@@ -1,4 +1,14 @@
-import type { ApiResponse, SessionInfo, AuthStatus, PostResult, Profile, OutputFile, HealthData } from '@/types'
+import type {
+  ApiResponse,
+  SessionInfo,
+  AuthStatus,
+  PostResult,
+  Profile,
+  OutputFile,
+  HealthData,
+  FollowerListResult,
+  FollowingVerifiedResult,
+} from '@/types'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -18,24 +28,49 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<ApiRespons
 export const getHealth = () => apiFetch<HealthData>('/api/health')
 
 // ── Auth ────────────────────────────────────────────────────────
-export const getSession      = () => apiFetch<SessionInfo>('/api/auth/session')
-export const getAuthStatus   = () => apiFetch<AuthStatus>('/api/auth/status')
-export const triggerLogin    = () => apiFetch('/api/auth/login', { method: 'POST', body: '{}' })
-export const triggerLogout   = () => apiFetch('/api/auth/logout', { method: 'POST', body: '{}' })
-export const saveCookies     = (cookies_json: string) =>
+export const getSession    = () => apiFetch<SessionInfo>('/api/auth/session')
+export const getAuthStatus = () => apiFetch<AuthStatus>('/api/auth/status')
+export const triggerLogin  = () => apiFetch('/api/auth/login', { method: 'POST', body: '{}' })
+export const triggerLogout = () => apiFetch('/api/auth/logout', { method: 'POST', body: '{}' })
+export const saveCookies   = (cookies_json: string) =>
   apiFetch('/api/auth/cookies', { method: 'POST', body: JSON.stringify({ cookies_json }) })
 
 // ── Scrape ──────────────────────────────────────────────────────
-export const scrapePost = (url: string, max_comments = 100) =>
+export interface ScrapePostOptions {
+  include_replies?: boolean
+  max_replies_per_comment?: number
+}
+
+export const scrapePost = (
+  url: string,
+  max_comments = 100,
+  opts: ScrapePostOptions = {},
+) =>
   apiFetch<PostResult>('/api/scrape/post', {
     method: 'POST',
-    body: JSON.stringify({ url, max_comments }),
+    body: JSON.stringify({
+      url,
+      max_comments,
+      include_replies: opts.include_replies ?? true,
+      max_replies_per_comment: opts.max_replies_per_comment ?? 20,
+    }),
   })
 
-export const scrapePosts = (urls: string[], max_comments = 100, delay_between = 8) =>
+export const scrapePosts = (
+  urls: string[],
+  max_comments = 100,
+  delay_between = 8,
+  opts: ScrapePostOptions = {},
+) =>
   apiFetch('/api/scrape/posts/batch', {
     method: 'POST',
-    body: JSON.stringify({ urls, max_comments, delay_between }),
+    body: JSON.stringify({
+      urls,
+      max_comments,
+      delay_between,
+      include_replies: opts.include_replies ?? true,
+      max_replies_per_comment: opts.max_replies_per_comment ?? 20,
+    }),
   })
 
 export const scrapeProfile = (username: string, save_snapshot = true) =>
@@ -43,6 +78,25 @@ export const scrapeProfile = (username: string, save_snapshot = true) =>
     method: 'POST',
     body: JSON.stringify({ username, save_snapshot }),
   })
+
+// ── Followers / Following / Verified Following ──────────────────
+export const scrapeFollowers = (username: string, max_count = 200) =>
+  apiFetch<{ followers: FollowerListResult } & FollowerListResult>(
+    '/api/scrape/profile/followers',
+    { method: 'POST', body: JSON.stringify({ username, max_count }) },
+  )
+
+export const scrapeFollowing = (username: string, max_count = 200) =>
+  apiFetch<{ following: FollowerListResult } & FollowerListResult>(
+    '/api/scrape/profile/following',
+    { method: 'POST', body: JSON.stringify({ username, max_count }) },
+  )
+
+export const scrapeFollowingVerified = (username: string, max_count = 500) =>
+  apiFetch<{ following_verified: FollowingVerifiedResult } & FollowingVerifiedResult>(
+    '/api/scrape/profile/following-verified',
+    { method: 'POST', body: JSON.stringify({ username, max_count }) },
+  )
 
 // ── Analytics ───────────────────────────────────────────────────
 export const listProfiles   = () => apiFetch<{ users: Profile[]; count: number }>('/api/profiles')
@@ -54,4 +108,4 @@ export const profileMonthly = (username: string) => apiFetch(`/api/profiles/${us
 
 // ── Output files ─────────────────────────────────────────────────
 export const listOutputFiles = () => apiFetch<{ files: OutputFile[]; count: number }>('/api/output/list')
-export const getOutputFile   = (filename: string) => fetch(`${BASE}/api/output/${filename}`).then(r => r.json())
+export const getOutputFile   = (filename: string) => fetch(`${BASE}/api/output/${filename}`).then(r => r.json())  

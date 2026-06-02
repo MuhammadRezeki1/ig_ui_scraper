@@ -1,21 +1,6 @@
 """
 main.py — FastAPI Backend untuk Instagram Scraper
-==================================================
-Versi ini memanggil engine scraper LANGSUNG (via subprocess), tanpa perlu
-menjalankan Flask server terpisah. Cukup 1 proses Python.
-
-Struktur:
-  backend/
-    ├── main.py          ← file ini
-    └── engine/          ← semua kode scraper kamu
-         ├── scraper_post.py
-         ├── profile_scraper.py
-         ├── session_manager.py
-         └── ...
-
-Run:
-  cd backend
-  uvicorn main:app --reload --port 8000
+Versi: + REPLIES (child_comments) support
 """
 import os
 import re
@@ -41,7 +26,7 @@ sys.path.insert(0, ENGINE_DIR)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ── APP ──────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Instagram Scraper API", version="1.0.0")
+app = FastAPI(title="Instagram Scraper API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,15 +45,33 @@ app.add_middleware(
 class ScrapePostRequest(BaseModel):
     url: str
     max_comments: int = 100
+    # ── BARU ─────────────────────────────────────────
+    include_replies: bool = True
+    max_replies_per_comment: int = 20
 
 class ScrapePostsRequest(BaseModel):
     urls: List[str]
     max_comments: int = 100
     delay_between: int = 8
+    # ── BARU ─────────────────────────────────────────
+    include_replies: bool = True
+    max_replies_per_comment: int = 20
 
 class ScrapeProfileRequest(BaseModel):
     username: str
     save_snapshot: bool = True
+
+class ScrapeFollowersRequest(BaseModel):
+    username: str
+    max_count: int = 200
+
+class ScrapeFollowingRequest(BaseModel):
+    username: str
+    max_count: int = 200
+
+class ScrapeFollowingVerifiedRequest(BaseModel):
+    username: str
+    max_count: int = 500
 
 class LoginCookieRequest(BaseModel):
     cookies_json: str
@@ -85,7 +88,6 @@ def success(data: dict, message: str = "Success"):
     }
 
 def failure(message: str, data: Optional[dict] = None):
-    """Response gagal TAPI HTTP 200, supaya frontend bisa baca pesannya."""
     return {
         "success": False,
         "message": message,
@@ -94,22 +96,13 @@ def failure(message: str, data: Optional[dict] = None):
     }
 
 
-# RESERVED: path Instagram yang BUKAN username
 _IG_RESERVED = {
     "p", "reel", "reels", "tv", "stories", "explore",
     "accounts", "direct", "api", "share", "about",
 }
 
 def extract_username(raw: str) -> str:
-    """
-    Terima username ATAU URL Instagram, kembalikan username bersih.
-      "prabowo"                              -> "prabowo"
-      "@prabowo"                             -> "prabowo"
-      "https://www.instagram.com/prabowo/"  -> "prabowo"
-      "instagram.com/prabowo?hl=en"         -> "prabowo"
-    """
     s = (raw or "").strip()
-
     if "instagram.com" in s.lower():
         m = re.search(r'instagram\.com/([^/?#]+)', s, re.I)
         if m:
@@ -117,18 +110,15 @@ def extract_username(raw: str) -> str:
             if candidate and candidate not in _IG_RESERVED:
                 return candidate
         return ""
-
     return s.lstrip("@").lower()
 
 
 def sanitize_filename(name: str) -> str:
-    """Buang karakter ilegal untuk nama file Windows/Linux."""
     cleaned = re.sub(r'[^A-Za-z0-9._-]', "_", name)
     return cleaned or "unknown"
 
 
 def save_json_output(data: dict, filename: str) -> str:
-    # FIX: sanitize nama file supaya tidak ada karakter ilegal (: / \ dll)
     safe_name = sanitize_filename(filename)
     fp = os.path.join(OUTPUT_DIR, safe_name)
     with open(fp, "w", encoding="utf-8") as f:
@@ -136,8 +126,16 @@ def save_json_output(data: dict, filename: str) -> str:
     return safe_name
 
 
-def run_post_scraper(url: str, max_comments: int) -> dict:
-    """Jalankan scraper_post.py sebagai subprocess (isolasi penuh)."""
+def run_post_scraper(
+    url: str,
+    max_comments: int,
+    include_replies: bool = True,
+    max_replies_per_comment: int = 20,
+) -> dict:
+    """
+    Jalankan post scraper sebagai subprocess. Param tambahan
+    untuk fetch replies (child_comments).
+    """
     script = f"""
 import sys
 sys.path.insert(0, r'{ENGINE_DIR}')
@@ -145,15 +143,19 @@ from scraper_post import InstagramScraperV16
 import json
 
 with InstagramScraperV16() as scraper:
-    result = scraper.scrape_post_comments({json.dumps(url)}, {max_comments})
+    result = scraper.scrape_post_comments(
+        {json.dumps(url)},
+        {max_comments},
+        include_replies={include_replies},
+        max_replies_per_comment={max_replies_per_comment},
+    )
     print("___RESULT_START___")
     print(json.dumps(result, ensure_ascii=False, default=str))
 """
-    return _run_subprocess(script, timeout=300)
+    return _run_subprocess(script, timeout=600)
 
 
 def run_profile_scraper(username: str) -> dict:
-    """Jalankan profile_scraper.py sebagai subprocess."""
     script = f"""
 import sys
 sys.path.insert(0, r'{ENGINE_DIR}')
@@ -168,8 +170,52 @@ with InstagramProfileScraper() as scraper:
     return _run_subprocess(script, timeout=120)
 
 
+def run_followers_scraper(username: str, max_count: int) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from profile_scraper import InstagramProfileScraper
+import json
+
+with InstagramProfileScraper() as scraper:
+    result = scraper.scrape_followers({json.dumps(username)}, {max_count})
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    return _run_subprocess(script, timeout=300)
+
+
+def run_following_scraper(username: str, max_count: int) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from profile_scraper import InstagramProfileScraper
+import json
+
+with InstagramProfileScraper() as scraper:
+    result = scraper.scrape_following({json.dumps(username)}, {max_count})
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    return _run_subprocess(script, timeout=300)
+
+
+def run_following_verified_scraper(username: str, max_count: int) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from profile_scraper import InstagramProfileScraper
+import json
+
+with InstagramProfileScraper() as scraper:
+    result = scraper.scrape_following_verified({json.dumps(username)}, {max_count})
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    return _run_subprocess(script, timeout=1800)
+
+
 def _run_subprocess(script: str, timeout: int) -> dict:
-    """Jalankan script Python di subprocess, ambil JSON setelah marker."""
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", delete=False, encoding="utf-8"
     ) as f:
@@ -233,7 +279,7 @@ def health():
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ENDPOINTS - AUTH (cookie based)
+# ENDPOINTS - AUTH
 # ════════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/auth/cookies")
@@ -296,14 +342,23 @@ def logout():
 def scrape_post(req: ScrapePostRequest):
     try:
         t0 = time.time()
-        result = run_post_scraper(req.url, req.max_comments)
+        result = run_post_scraper(
+            req.url,
+            req.max_comments,
+            include_replies=req.include_replies,
+            max_replies_per_comment=req.max_replies_per_comment,
+        )
         elapsed = round(time.time() - t0, 2)
 
         filename = f"api_post_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         save_json_output(result, filename)
 
         result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": filename}
-        msg = f"Scraped {result.get('comments_count', 0)} comments in {elapsed}s"
+        total_items = result.get("comments_count", 0) + result.get("replies_count", 0)
+        msg = (
+            f"Scraped {result.get('comments_count', 0)} comments + "
+            f"{result.get('replies_count', 0)} replies in {elapsed}s"
+        )
         return success(result, msg)
     except Exception as e:
         traceback.print_exc()
@@ -317,7 +372,12 @@ def scrape_posts_batch(req: ScrapePostsRequest):
     t0 = time.time()
     for i, url in enumerate(req.urls):
         try:
-            r = run_post_scraper(url, req.max_comments)
+            r = run_post_scraper(
+                url,
+                req.max_comments,
+                include_replies=req.include_replies,
+                max_replies_per_comment=req.max_replies_per_comment,
+            )
             results.append({"url": url, "success": True, "data": r})
         except Exception as e:
             results.append({"url": url, "success": False, "error": str(e)})
@@ -339,7 +399,6 @@ def scrape_posts_batch(req: ScrapePostsRequest):
 
 @app.post("/api/scrape/profile")
 def scrape_profile(req: ScrapeProfileRequest):
-    # FIX: terima username ATAU URL, lalu bersihkan
     username = extract_username(req.username)
     if not username:
         return failure(
@@ -353,7 +412,6 @@ def scrape_profile(req: ScrapeProfileRequest):
         result = run_profile_scraper(username)
         elapsed = round(time.time() - t0, 2)
 
-        # FIX: nama file pakai username yang sudah bersih + sanitize
         filename = f"api_profile_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         saved = save_json_output(result, filename)
 
@@ -375,6 +433,121 @@ def scrape_profile(req: ScrapeProfileRequest):
         return failure(
             f"Profile @{username} error: {str(e)}",
             {"profile": {"username": username, "success": False, "error": str(e)}},
+        )
+
+
+@app.post("/api/scrape/profile/followers")
+def scrape_followers(req: ScrapeFollowersRequest):
+    username = extract_username(req.username)
+    if not username:
+        return failure(
+            f"Tidak bisa menentukan username dari input: '{req.username}'",
+            {"username": req.username, "kind": "followers", "success": False, "items": []},
+        )
+
+    try:
+        t0 = time.time()
+        result = run_followers_scraper(username, req.max_count)
+        elapsed = round(time.time() - t0, 2)
+
+        filename = f"api_followers_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        saved = save_json_output(result, filename)
+
+        result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": saved}
+
+        if not result.get("success"):
+            err = result.get("error", "Gagal tanpa detail")
+            return failure(
+                f"Followers @{username} gagal: {err}",
+                {"followers": result, **result},
+            )
+
+        return success(
+            {"followers": result, **result},
+            f"Followers @{username}: {result.get('count', 0)} items in {elapsed}s",
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return failure(
+            f"Followers @{username} error: {str(e)}",
+            {"followers": {"username": username, "success": False, "items": [], "error": str(e)}},
+        )
+
+
+@app.post("/api/scrape/profile/following")
+def scrape_following(req: ScrapeFollowingRequest):
+    username = extract_username(req.username)
+    if not username:
+        return failure(
+            f"Tidak bisa menentukan username dari input: '{req.username}'",
+            {"username": req.username, "kind": "following", "success": False, "items": []},
+        )
+
+    try:
+        t0 = time.time()
+        result = run_following_scraper(username, req.max_count)
+        elapsed = round(time.time() - t0, 2)
+
+        filename = f"api_following_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        saved = save_json_output(result, filename)
+
+        result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": saved}
+
+        if not result.get("success"):
+            err = result.get("error", "Gagal tanpa detail")
+            return failure(
+                f"Following @{username} gagal: {err}",
+                {"following": result, **result},
+            )
+
+        return success(
+            {"following": result, **result},
+            f"Following @{username}: {result.get('count', 0)} items in {elapsed}s",
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return failure(
+            f"Following @{username} error: {str(e)}",
+            {"following": {"username": username, "success": False, "items": [], "error": str(e)}},
+        )
+
+
+@app.post("/api/scrape/profile/following-verified")
+def scrape_following_verified(req: ScrapeFollowingVerifiedRequest):
+    username = extract_username(req.username)
+    if not username:
+        return failure(
+            f"Tidak bisa menentukan username dari input: '{req.username}'",
+            {"username": req.username, "kind": "following_verified", "success": False, "items": []},
+        )
+
+    try:
+        t0 = time.time()
+        result = run_following_verified_scraper(username, req.max_count)
+        elapsed = round(time.time() - t0, 2)
+
+        filename = f"api_following_verified_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        saved = save_json_output(result, filename)
+
+        result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": saved}
+
+        if not result.get("success"):
+            err = result.get("error", "Gagal tanpa detail")
+            return failure(
+                f"Verified Following @{username} gagal: {err}",
+                {"following_verified": result, **result},
+            )
+
+        return success(
+            {"following_verified": result, **result},
+            f"Verified Following @{username}: {result.get('count', 0)} verified "
+            f"(scanned {result.get('total_scanned', 0)}) in {elapsed}s",
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return failure(
+            f"Verified Following @{username} error: {str(e)}",
+            {"following_verified": {"username": username, "success": False, "items": [], "error": str(e)}},
         )
 
 
@@ -410,12 +583,11 @@ def get_output_file(filename: str):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ENDPOINTS - ANALYTICS (placeholder: butuh storage_manager)
+# ENDPOINTS - ANALYTICS
 # ════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/profiles")
 def list_profiles():
-    """List tracked profiles. Butuh storage_manager.py di engine."""
     try:
         from storage_manager import StorageManager
         storage = StorageManager()

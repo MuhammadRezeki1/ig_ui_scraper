@@ -25,17 +25,19 @@ PROXY                  = os.getenv("PROXY", "")
 MAX_POSTS              = int(os.getenv("MAX_POSTS", 10))
 DELAY_BETWEEN_REQUESTS = int(os.getenv("DELAY_BETWEEN_REQUESTS", 5))
 MAX_COMMENTS           = int(os.getenv("MAX_COMMENTS", 100))
-SENTIMENT_MODE         = os.getenv("SENTIMENT_MODE", "hybrid")  # hybrid | ml_only | rule_only
+SENTIMENT_MODE         = os.getenv("SENTIMENT_MODE", "hybrid")
 
-# Pilih profile: bisa reuse chrome_profile (Selenium) atau playwright_profile
-PROFILE_DIR = os.getenv("PROFILE_DIR", "chrome_profile_playwright")  # atau "playwright_profile"
+# ── REPLIES (BARU) ─────────────────────────────────────────────────────────
+INCLUDE_REPLIES        = os.getenv("INCLUDE_REPLIES", "true").lower() == "true"
+MAX_REPLIES_PER_COMMENT = int(os.getenv("MAX_REPLIES_PER_COMMENT", 20))
+
+PROFILE_DIR = os.getenv("PROFILE_DIR", "chrome_profile_playwright")
 CHROME_PROFILE = os.path.join(os.getcwd(), PROFILE_DIR)
 
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(CHROME_PROFILE, exist_ok=True)
 
-# GraphQL query_hash yang terbukti work (48 comments/request)
 GRAPHQL_QUERY_HASH = "97b41c52301f77ce508f55e66d17620e"
 
 
@@ -67,10 +69,9 @@ class InstagramScraperV16:
     def __exit__(self, *_):
         self.close()
 
-    # ── HELPER: pastikan page/session siap (buat Pylance & runtime aman) ────
+    # ── HELPER ─────────────────────────────────────────────────────────────
 
     def _require_page(self) -> Page:
-        """Pastikan page sudah ada. Raise kalau belum initialize_browser()."""
         if self.page is None:
             raise RuntimeError("Browser belum di-inisialisasi. Panggil initialize_browser() dulu.")
         return self.page
@@ -88,7 +89,6 @@ class InstagramScraperV16:
     # ── BROWSER SETUP ──────────────────────────────────────────────────────
 
     def _build_context(self) -> BrowserContext:
-        """Launch Playwright dengan persistent context (reuse profile)"""
         self.playwright = sync_playwright().start()
 
         args = [
@@ -105,9 +105,8 @@ class InstagramScraperV16:
         ]
         if PROXY:
             args.append(f"--proxy-server={PROXY}")
-        args = [a for a in args if a]  # remove empty
+        args = [a for a in args if a]
 
-        # Stealth: inject script sebelum page load (raw string biar aman)
         stealth_script = r"""
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
             Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
@@ -115,11 +114,7 @@ class InstagramScraperV16:
             Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
             Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
             Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 4});
-
-            // Hapus property automation
             delete navigator.__proto__.webdriver;
-
-            // Mock permissions
             const originalQuery = window.navigator.permissions.query;
             window.navigator.permissions.query = (parameters) => (
                 parameters.name === 'notifications'
@@ -140,10 +135,8 @@ class InstagramScraperV16:
             java_script_enabled=True,
         )
 
-        # Inject stealth ke semua page baru
         context.on("page", lambda page: page.add_init_script(stealth_script))
 
-        # ── COOKIE LOGIN: inject cookies dari session/ig_session.json ──
         try:
             if has_valid_session():
                 n = inject_cookies_sync(context)
@@ -160,22 +153,12 @@ class InstagramScraperV16:
         print(Fore.CYAN + "\n🌐 Membuka browser (Playwright)...")
         self.context = self._build_context()
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
-        page = self.page  # local non-optional reference
+        page = self.page
 
-        # ================================================================
-        # FIX V16.1: Resource Blocking yang BENAR
-        # ================================================================
-        # MASALAH SEBELUMNYA: Block CSS/JS → Instagram SPA jadi broken
-        # SOLUSI: Block hanya gambar/media/font, biarkan CSS & JS jalan
-        # ================================================================
         def block_heavy_resources(route):
             resource_type = route.request.resource_type
             url = route.request.url.lower()
-
-            # Block hanya resource yang benar-benar tidak perlu untuk scraping
-            # CSS dan JS WAJIB di-allow karena Instagram adalah SPA (Single Page App)
             if resource_type in ["image", "media", "font"]:
-                # Tapi allow favicon dan icon kecil (biar tidak suspicious)
                 if "favicon" in url or "icon" in url:
                     route.continue_()
                 else:
@@ -197,16 +180,10 @@ class InstagramScraperV16:
         print(Fore.GREEN + "✅ Browser siap (LOGGED IN)")
 
     def _close_popups(self):
-        """Tutup popup 'Not Now', 'Cancel', dll."""
         page = self._require_page()
         popup_selectors = [
-            "text=Not Now",
-            "text=Sekarang tidak",
-            "text=Cancel",
-            "text=Batal",
-            "text=Turn Off",
-            "text=Save Info",
-            "text=Not Now",
+            "text=Not Now", "text=Sekarang tidak", "text=Cancel",
+            "text=Batal", "text=Turn Off", "text=Save Info",
             "button:has-text('Not Now')",
         ]
         for selector in popup_selectors:
@@ -234,24 +211,17 @@ class InstagramScraperV16:
     # ── REQUESTS SESSION ───────────────────────────────────────────────────
 
     def _build_requests_session(self) -> requests.Session:
-        """Build requests session dari cookies Playwright"""
         sess = requests.Session()
         context = self._require_context()
 
-        # Ambil cookies dari context
         cookies = context.cookies()
         for cookie in cookies:
             name = cookie.get("name")
             value = cookie.get("value")
             if not name or value is None:
                 continue
-            sess.cookies.set(
-                name,
-                value,
-                domain=cookie.get("domain", ".instagram.com"),
-            )
+            sess.cookies.set(name, value, domain=cookie.get("domain", ".instagram.com"))
 
-        # Ambil csrf dari cookies
         csrf = next((c.get("value", "") for c in cookies if c.get("name") == "csrftoken"), "")
 
         sess.headers.update({
@@ -296,14 +266,7 @@ class InstagramScraperV16:
         except Exception:
             return None
 
-    # ── EXTRACT OWNER USERNAME (FIX: berlapis 4 pola) ───────────────────────
-
     def _get_owner_username(self) -> str:
-        """
-        Ambil username pemilik post dari beberapa sumber meta + embedded JSON.
-        FIX: og:title IG modern TIDAK selalu pakai '@username'. Format umum
-        sekarang: '20K likes, 3,109 comments - USERNAME on May 29, 2026:'.
-        """
         page = self._require_page()
         try:
             owner = page.evaluate(r"""() => {
@@ -312,20 +275,16 @@ class InstagramScraperV16:
                 const title = (document.querySelector('meta[property="og:title"]')?.content) || '';
                 const desc  = (document.querySelector('meta[property="og:description"]')?.content) || '';
 
-                // Pola 1: "@username" di title (format lama)
                 let m = title.match(/@([\w.]+)/);
                 if (m) return cleanUser(m[1]);
 
-                // Pola 2: "... comments - USERNAME on ..." (format IG modern)
                 m = desc.match(/comments?\s*-\s*([\w.]+)\s+on\b/i)
                     || title.match(/comments?\s*-\s*([\w.]+)\s+on\b/i);
                 if (m) return cleanUser(m[1]);
 
-                // Pola 3: "USERNAME on Instagram:"
                 m = title.match(/^([\w.]+)\s+on\s+Instagram/i);
                 if (m) return cleanUser(m[1]);
 
-                // Pola 4: embedded JSON "owner":{..."username":"..."}
                 const scripts = Array.from(document.querySelectorAll('script[type="application/json"]'));
                 for (const s of scripts) {
                     const t = s.textContent || '';
@@ -345,7 +304,6 @@ class InstagramScraperV16:
     # ── EXTRACT ENGAGEMENT METRICS ─────────────────────────────────────────
 
     def _fetch_media_info_rest(self, media_id: str) -> Dict:
-        """Strategy 1: REST /api/v1/media/{id}/info/"""
         url = f"https://www.instagram.com/api/v1/media/{media_id}/info/"
         try:
             sess = self._require_session()
@@ -363,18 +321,8 @@ class InstagramScraperV16:
             item = items[0]
             metrics = {}
 
-            view_count = (
-                item.get("view_count")
-                or item.get("ig_play_count")
-                or item.get("video_view_count")
-                or 0
-            )
-            play_count = (
-                item.get("play_count")
-                or item.get("ig_play_count")
-                or item.get("video_play_count")
-                or 0
-            )
+            view_count = item.get("view_count") or item.get("ig_play_count") or item.get("video_view_count") or 0
+            play_count = item.get("play_count") or item.get("ig_play_count") or item.get("video_play_count") or 0
             metrics["video_views"] = int(view_count)
             metrics["play_count"]  = int(play_count)
 
@@ -394,7 +342,6 @@ class InstagramScraperV16:
             else:
                 metrics["likes"] = int(like_info or 0)
 
-            # FIX: ikut ambil owner username dari REST media info (paling andal)
             user = item.get("user", {}) or item.get("owner", {}) or {}
             uname = user.get("username", "")
             if uname:
@@ -412,7 +359,6 @@ class InstagramScraperV16:
             return {}
 
     def _fetch_media_info_cdp(self, media_id: str) -> Dict:
-        """Strategy 2: CDP Fetch menggunakan page.evaluate (Playwright)"""
         page = self._require_page()
         try:
             result = page.evaluate(r"""async (mediaId) => {
@@ -445,18 +391,8 @@ class InstagramScraperV16:
             item = items[0]
             metrics = {}
 
-            view_count = (
-                item.get("view_count")
-                or item.get("ig_play_count")
-                or item.get("video_view_count")
-                or 0
-            )
-            play_count = (
-                item.get("play_count")
-                or item.get("ig_play_count")
-                or item.get("video_play_count")
-                or 0
-            )
+            view_count = item.get("view_count") or item.get("ig_play_count") or item.get("video_view_count") or 0
+            play_count = item.get("play_count") or item.get("ig_play_count") or item.get("video_play_count") or 0
             metrics["video_views"] = int(view_count)
             metrics["play_count"]  = int(play_count)
 
@@ -467,9 +403,7 @@ class InstagramScraperV16:
             metrics["reshare_count"]     = int(reshare)
             metrics["direct_send_count"] = int(direct)
 
-            metrics["saves_count"] = int(
-                item.get("saved_count") or item.get("save_count") or 0
-            )
+            metrics["saves_count"] = int(item.get("saved_count") or item.get("save_count") or 0)
 
             like_info = item.get("like_count") or item.get("likes", {})
             if isinstance(like_info, dict):
@@ -477,7 +411,6 @@ class InstagramScraperV16:
             else:
                 metrics["likes"] = int(like_info or 0)
 
-            # FIX: owner username dari CDP media info
             user = item.get("user", {}) or item.get("owner", {}) or {}
             uname = user.get("username", "")
             if uname:
@@ -494,7 +427,6 @@ class InstagramScraperV16:
             return {}
 
     def _fetch_media_info_from_page(self) -> Dict:
-        """Strategy 3: Ambil dari page source / embedded JS data"""
         page = self._require_page()
         try:
             metrics = page.evaluate(r"""() => {
@@ -533,7 +465,6 @@ class InstagramScraperV16:
                         const pt = str.match(/"product_type":"([^"]+)"/);
                         if (pt) combined.product_type = pt[1];
 
-                        // FIX: owner username dari embedded JSON
                         const ou = str.match(/"owner":\{[^}]*?"username":"([\w.]+)"/);
                         if (ou && !combined.owner_username) combined.owner_username = ou[1];
 
@@ -547,7 +478,6 @@ class InstagramScraperV16:
             return {}
 
     def _get_engagement_metrics(self, media_id: str) -> Dict:
-        """Orchestrator: coba 3 strategy secara berurutan"""
         default = {
             "video_views":       0,
             "play_count":        0,
@@ -573,23 +503,16 @@ class InstagramScraperV16:
         if not metrics and media_id:
             print(Fore.YELLOW + "   ↩️  Fallback ke CDP...")
             metrics = self._fetch_media_info_cdp(media_id)
-            if metrics:
-                print(Fore.GREEN + f"   ✅ Metrics via CDP: views={metrics.get('video_views',0):,} "
-                      f"plays={metrics.get('play_count',0):,} "
-                      f"shares={metrics.get('shares_count',0):,} "
-                      f"saves={metrics.get('saves_count',0):,}")
 
         if not metrics:
             print(Fore.YELLOW + "   ↩️  Fallback ke page source...")
             metrics = self._fetch_media_info_from_page()
-            if metrics:
-                print(Fore.GREEN + "   ✅ Metrics partial dari page source")
 
         merged = {**default, **{k: v for k, v in metrics.items() if v}}
         return merged
 
     # ============================================================
-    # STRATEGY 1: GraphQL GET  (PRIMARY - untuk komentar)
+    # STRATEGY 1: GraphQL GET  (PRIMARY - parent comments)
     # ============================================================
 
     def _fetch_via_graphql(self, shortcode: str, max_comments: int) -> List[Dict]:
@@ -678,7 +601,7 @@ class InstagramScraperV16:
         return all_comments
 
     # ============================================================
-    # STRATEGY 2: CDP Fetch (FALLBACK - browser context)
+    # STRATEGY 2: CDP Fetch (FALLBACK - parent comments)
     # ============================================================
 
     def _fetch_via_cdp(self, media_id: str, max_comments: int) -> List[Dict]:
@@ -692,7 +615,6 @@ class InstagramScraperV16:
             page_num += 1
 
             try:
-                # Playwright page.evaluate menerima 1 argumen; bungkus jadi dict
                 result = page.evaluate(r"""(params) => {
                     const { mediaId, minId } = params;
                     return (async () => {
@@ -761,7 +683,7 @@ class InstagramScraperV16:
         return all_comments
 
     # ============================================================
-    # STRATEGY 3: REST API (LAST RESORT - untuk komentar)
+    # STRATEGY 3: REST API (LAST RESORT - parent comments)
     # ============================================================
 
     def _fetch_via_rest(self, media_id: str, max_comments: int) -> List[Dict]:
@@ -829,12 +751,184 @@ class InstagramScraperV16:
         return all_comments
 
     # ============================================================
+    # REPLIES (CHILD COMMENTS) - BARU
+    # ============================================================
+    #
+    # Endpoint IG:
+    #   /api/v1/media/{media_id}/comments/{parent_pk}/child_comments/
+    #
+    # Pagination via max_id (cursor) yang dikembalikan di response.
+    # Response shape:
+    #   {
+    #     "child_comments": [...],   // sebagian build pakai "comments"
+    #     "has_more_comments": bool,
+    #     "next_max_id": "..."
+    #   }
+    # ============================================================
+
+    def _parse_reply(self, c: Dict, parent_pk: str) -> Optional[Dict]:
+        """Normalisasi 1 reply dari response IG."""
+        username = c.get("user", {}).get("username", "")
+        text = c.get("text", "")
+        if not username or not text:
+            return None
+        return {
+            "username":          username,
+            "text":              text,
+            "comment_id":        str(c.get("pk", "")),
+            "like_count":        c.get("comment_like_count", 0) or 0,
+            "created_at":        c.get("created_at", 0) or 0,
+            "parent_comment_id": str(parent_pk),
+        }
+
+    def _fetch_replies_via_cdp(self, media_id: str, parent_pk: str, max_replies: int) -> List[Dict]:
+        """Strategy 1: CDP Fetch (browser context) untuk child_comments."""
+        all_replies: List[Dict] = []
+        next_max_id: Optional[str] = None
+        page_num = 0
+        max_pages = 5
+        page = self._require_page()
+
+        while len(all_replies) < max_replies and page_num < max_pages:
+            page_num += 1
+            try:
+                result = page.evaluate(r"""(params) => {
+                    const { mediaId, parentPk, maxId } = params;
+                    return (async () => {
+                        try {
+                            let url = `/api/v1/media/${mediaId}/comments/${parentPk}/child_comments/`;
+                            if (maxId) url += `?max_id=${encodeURIComponent(maxId)}`;
+                            const resp = await fetch(url, {
+                                method: 'GET',
+                                credentials: 'include',
+                                headers: {
+                                    'X-IG-App-ID': '936619743392459',
+                                    'X-ASBD-ID': '129477',
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                    'Accept': '*/*',
+                                }
+                            });
+                            const data = await resp.json();
+                            return {ok: true, status: resp.status, data: data};
+                        } catch(e) {
+                            return {ok: false, error: e.toString()};
+                        }
+                    })();
+                }""", {"mediaId": media_id, "parentPk": parent_pk, "maxId": next_max_id})
+
+                if not result.get("ok"):
+                    break
+
+                if result.get("status") and result["status"] != 200:
+                    break
+
+                data = result.get("data") or {}
+                raw = data.get("child_comments") or data.get("comments") or []
+                if not raw:
+                    break
+
+                for c in raw:
+                    parsed = self._parse_reply(c, parent_pk)
+                    if parsed:
+                        all_replies.append(parsed)
+                    if len(all_replies) >= max_replies:
+                        break
+
+                next_max_id = data.get("next_max_id") or data.get("next_min_id")
+                has_more = data.get("has_more_comments") or data.get("has_more_headload_comments") or False
+                if not next_max_id or not has_more:
+                    break
+
+                time.sleep(random.uniform(0.5, 1.2))
+
+            except Exception as e:
+                print(Fore.YELLOW + f"      ⚠️  Reply CDP error: {e}")
+                break
+
+        return all_replies
+
+    def _fetch_replies_via_rest(self, media_id: str, parent_pk: str, max_replies: int) -> List[Dict]:
+        """Strategy 2: REST direct via requests session."""
+        all_replies: List[Dict] = []
+        next_max_id: Optional[str] = None
+        page_num = 0
+        max_pages = 5
+        sess = self._require_session()
+
+        while len(all_replies) < max_replies and page_num < max_pages:
+            page_num += 1
+            url = f"https://www.instagram.com/api/v1/media/{media_id}/comments/{parent_pk}/child_comments/"
+            params: Dict[str, str] = {}
+            if next_max_id:
+                params["max_id"] = next_max_id
+
+            try:
+                resp = sess.get(url, params=params, timeout=15)
+                if resp.status_code == 429:
+                    time.sleep(45)
+                    continue
+                if resp.status_code != 200:
+                    break
+                if 'json' not in resp.headers.get('content-type', ''):
+                    break
+
+                data = resp.json()
+                raw = data.get("child_comments") or data.get("comments") or []
+                if not raw:
+                    break
+
+                for c in raw:
+                    parsed = self._parse_reply(c, parent_pk)
+                    if parsed:
+                        all_replies.append(parsed)
+                    if len(all_replies) >= max_replies:
+                        break
+
+                next_max_id = data.get("next_max_id") or data.get("next_min_id")
+                has_more = data.get("has_more_comments") or data.get("has_more_headload_comments") or False
+                if not next_max_id or not has_more:
+                    break
+
+                time.sleep(random.uniform(0.5, 1.2))
+
+            except Exception as e:
+                print(Fore.YELLOW + f"      ⚠️  Reply REST error: {e}")
+                break
+
+        return all_replies
+
+    def _fetch_replies(self, media_id: str, parent_pk: str, max_replies: int) -> List[Dict]:
+        """Cascade: CDP → REST. Skip kalau parent_pk kosong."""
+        if not media_id or not parent_pk:
+            return []
+
+        try:
+            replies = self._fetch_replies_via_cdp(media_id, parent_pk, max_replies)
+            if replies:
+                return replies
+        except Exception:
+            pass
+
+        try:
+            return self._fetch_replies_via_rest(media_id, parent_pk, max_replies)
+        except Exception:
+            return []
+
+    # ============================================================
     # MAIN SCRAPE FLOW
     # ============================================================
 
-    def scrape_post_comments(self, post_url: str, max_comments: int = MAX_COMMENTS) -> Dict:
+    def scrape_post_comments(
+        self,
+        post_url: str,
+        max_comments: int = MAX_COMMENTS,
+        include_replies: bool = INCLUDE_REPLIES,
+        max_replies_per_comment: int = MAX_REPLIES_PER_COMMENT,
+    ) -> Dict:
         print(Fore.CYAN + "\n" + "=" * 70)
         print(Fore.CYAN + f"📝 {post_url[:70]}")
+        print(Fore.CYAN + f"   include_replies={include_replies} "
+              f"max_replies_per_comment={max_replies_per_comment}")
         print(Fore.CYAN + "=" * 70)
 
         m = re.search(r'/(p|reel|tv)/([A-Za-z0-9_-]+)', post_url)
@@ -848,6 +942,8 @@ class InstagramScraperV16:
             "shortcode": shortcode,
             "scraped_at": datetime.now().isoformat(),
             "sentiment_mode": self.sentiment.mode,
+            "include_replies": include_replies,
+            "max_replies_per_comment": max_replies_per_comment,
             "caption": "",
             "likes": 0,
             "owner_username": "",
@@ -863,6 +959,7 @@ class InstagramScraperV16:
             "saves_count":       0,
             "comments": [],
             "comments_count": 0,
+            "replies_count": 0,
             "sentiment_summary": {},
         }
 
@@ -883,13 +980,11 @@ class InstagramScraperV16:
             if "challenge" in page.url:
                 raise Exception("Challenge terdeteksi")
 
-            # Tunggu article/main load
             try:
                 page.wait_for_selector("article, main", timeout=15000)
             except PlaywrightTimeout:
                 pass
 
-            # Extract metadata
             try:
                 body_text = page.locator("body").inner_text()
                 lm = re.search(r'([\d,]+)\s+likes?', body_text, re.I)
@@ -910,7 +1005,6 @@ class InstagramScraperV16:
             except Exception:
                 pass
 
-            # ── FIX: ekstraksi owner username berlapis ──────────────
             owner = self._get_owner_username()
             if owner:
                 result["owner_username"] = owner
@@ -923,7 +1017,6 @@ class InstagramScraperV16:
 
             self.session = self._build_requests_session()
 
-            # ── AMBIL ENGAGEMENT METRICS ─────────────────────────────
             engagement = self._get_engagement_metrics(media_id or "")
 
             result["media_type"]        = engagement.get("media_type", "UNKNOWN")
@@ -938,7 +1031,6 @@ class InstagramScraperV16:
             if engagement.get("likes", 0) > 0:
                 result["likes"] = engagement["likes"]
 
-            # FIX: kalau owner masih kosong, isi dari media info API (paling andal)
             if not result["owner_username"] and engagement.get("owner_username"):
                 result["owner_username"] = engagement["owner_username"]
                 print(Fore.CYAN + f"👤 Owner (dari media info): @{result['owner_username']}")
@@ -953,7 +1045,6 @@ class InstagramScraperV16:
                     if not result["product_type"]:
                         result["product_type"] = "igtv"
 
-            # Print engagement summary
             print(Fore.CYAN + f"\n📈 Engagement Metrics:")
             print(Fore.CYAN + f"   📌 Media type   : {result['media_type']} ({result['product_type'] or 'feed'})")
             print(Fore.CYAN + f"   ❤️  Likes        : {result['likes']:,}")
@@ -967,7 +1058,7 @@ class InstagramScraperV16:
             if result["saves_count"] > 0:
                 print(Fore.CYAN + f"   🔖 Saves        : {result['saves_count']:,}")
 
-            # ── CASCADE: GraphQL → CDP → REST (untuk komentar) ─────
+            # ── CASCADE: GraphQL → CDP → REST ─────
             raw_comments: List[Dict] = []
             method_used = ""
 
@@ -981,7 +1072,7 @@ class InstagramScraperV16:
                 print(Fore.YELLOW + f"   ⚠️  GraphQL gagal: {e}")
 
             if not raw_comments and media_id:
-                print(Fore.CYAN + f"\n📡 [Strategy 2] CDP Fetch (browser context)...")
+                print(Fore.CYAN + f"\n📡 [Strategy 2] CDP Fetch...")
                 try:
                     raw_comments = self._fetch_via_cdp(media_id, max_comments)
                     if raw_comments:
@@ -1005,7 +1096,7 @@ class InstagramScraperV16:
             if not raw_comments:
                 print(Fore.RED + "\n❌ Semua strategy gagal")
 
-            # Dedup
+            # Dedup parent comments
             seen_ids = set()
             unique_comments: List[Dict] = []
             for c in raw_comments:
@@ -1016,80 +1107,72 @@ class InstagramScraperV16:
                     seen_ids.add(cid)
                 unique_comments.append(c)
 
-            # ── SENTIMENT ANALYSIS ─────────────────────────────
+            # ── SENTIMENT untuk PARENT ─────
             t_sentiment_start = time.time()
             if unique_comments:
                 print(Fore.CYAN + f"\n🧠 Analisis sentimen {len(unique_comments)} komentar...")
 
             final_comments: List[Dict] = []
+            total_replies_fetched = 0
+
             for i, rc in enumerate(unique_comments, 1):
                 text = rc.get("text", "")
                 if not text:
                     continue
 
-                analysis = self.sentiment.analyze_sentiment(text)
-                category = self.sentiment.categorize_comment(text)
-
-                entry = {
-                    "number":          i,
-                    "username":        rc.get("username", ""),
-                    "text":            text,
-                    "comment_id":      rc.get("comment_id", ""),
-                    "like_count":      rc.get("like_count", 0),
-                    "created_at":      rc.get("created_at", 0),
-                    "reply_count":     rc.get("reply_count", 0),
-                    "category":        category,
-                    "sentiment":       analysis["sentiment"],
-                    "language":        analysis["language"],
-                    "is_hate_speech":  analysis["is_hate_speech"],
-                    "is_toxic":        analysis["is_toxic"],
-                    "is_sarcasm":      analysis.get("is_sarcasm", False),
-                    "is_wellwish":     analysis.get("is_wellwish", False),
-                    "hate_score":      analysis["hate_score"],
-                    "hate_words":      analysis["hate_words"],
-                    "toxic_words":     analysis["toxic_words"],
-                    "positive_words":  analysis["positive_words"],
-                    "negative_words":  analysis.get("negative_words", []),
-                    "humor_words":     analysis["humor_words"],
-                    "emojis":          analysis["emojis"],
-                    "ml_confidence":   analysis.get("ml_confidence", 0.0),
-                    "decision_source": analysis.get("decision_source", "rule"),
-                    "vader_compound":  analysis.get("vader_compound", 0.0),
-                }
+                entry = self._build_comment_entry(rc, number=i)
                 final_comments.append(entry)
+                self._print_comment_line(entry, i)
 
-                if analysis["is_hate_speech"]:
-                    label = Fore.RED     + "🚨 HATE "
-                elif analysis["is_toxic"]:
-                    label = Fore.YELLOW  + "⚠️  TOXIC"
-                elif category == "POSITIVE":
-                    label = Fore.GREEN   + "😊 POS  "
-                elif category == "NEGATIVE":
-                    label = Fore.MAGENTA + "😞 NEG  "
-                elif category == "HUMOR":
-                    label = Fore.CYAN    + "😂 HUMOR"
+                # ── REPLIES: kalau diaktifkan & komentar punya reply_count > 0 ─
+                reply_count_raw = int(rc.get("reply_count", 0) or 0)
+                if include_replies and reply_count_raw > 0 and max_replies_per_comment > 0:
+                    parent_pk = rc.get("comment_id", "")
+                    if parent_pk and media_id:
+                        print(Fore.CYAN + f"      ↳ fetch {min(reply_count_raw, max_replies_per_comment)} "
+                              f"reply untuk @{rc.get('username','')[:18]}...")
+                        raw_replies = self._fetch_replies(
+                            media_id, parent_pk, max_replies_per_comment
+                        )
+
+                        # Dedup replies
+                        seen_reply = set()
+                        final_replies: List[Dict] = []
+                        for j, rr in enumerate(raw_replies, 1):
+                            rid = rr.get("comment_id", "")
+                            if rid and rid in seen_reply:
+                                continue
+                            if rid:
+                                seen_reply.add(rid)
+
+                            reply_entry = self._build_comment_entry(
+                                rr, number=j, is_reply=True, parent_pk=parent_pk
+                            )
+                            final_replies.append(reply_entry)
+                            self._print_reply_line(reply_entry, j)
+
+                        entry["replies"] = final_replies
+                        entry["replies_fetched"] = len(final_replies)
+                        total_replies_fetched += len(final_replies)
+
+                        # Jeda kecil antar pemanggilan reply biar tidak hammer
+                        time.sleep(random.uniform(0.4, 0.9))
+                    else:
+                        entry["replies"] = []
+                        entry["replies_fetched"] = 0
                 else:
-                    label = Fore.WHITE   + "💬 NEU  "
-
-                indicators = []
-                if analysis.get("is_sarcasm"):
-                    indicators.append("🎭")
-                if analysis.get("is_wellwish"):
-                    indicators.append("🙏")
-                ind_str = "".join(indicators)
-
-                preview = text[:55].replace("\n", " ")
-                likes = rc.get("like_count", 0)
-                likes_str = f" [{likes}❤]" if likes > 0 else ""
-                print(f"{label} #{i:3d} {ind_str} @{entry['username'][:18]}: {preview}{likes_str}")
+                    entry["replies"] = []
+                    entry["replies_fetched"] = 0
 
             if unique_comments:
                 t_sentiment = time.time() - t_sentiment_start
-                print(Fore.CYAN + f"   ⏱️  Sentiment analysis: {t_sentiment:.1f}s "
-                      f"({t_sentiment/len(unique_comments)*1000:.0f}ms per komentar)")
+                per_item = t_sentiment / max(1, len(unique_comments))
+                print(Fore.CYAN + f"\n   ⏱️  Total proses (parent+reply): {t_sentiment:.1f}s "
+                      f"(~{per_item*1000:.0f}ms per parent)")
 
             result["comments"] = final_comments
             result["comments_count"] = len(final_comments)
+            result["replies_count"] = total_replies_fetched
             result["sentiment_summary"] = self._summarize(final_comments, result)
 
         except Exception as e:
@@ -1100,7 +1183,96 @@ class InstagramScraperV16:
 
         return result
 
-    # ── SUMMARY (ENHANCED dengan engagement metrics) ───────────
+    # ── HELPER: build entry komentar (parent atau reply) ─────────────────
+
+    def _build_comment_entry(
+        self,
+        rc: Dict,
+        number: int,
+        is_reply: bool = False,
+        parent_pk: str = "",
+    ) -> Dict:
+        text = rc.get("text", "")
+        analysis = self.sentiment.analyze_sentiment(text)
+        category = self.sentiment.categorize_comment(text)
+
+        entry = {
+            "number":          number,
+            "username":        rc.get("username", ""),
+            "text":            text,
+            "comment_id":      rc.get("comment_id", ""),
+            "like_count":      rc.get("like_count", 0),
+            "created_at":      rc.get("created_at", 0),
+            "reply_count":     rc.get("reply_count", 0) if not is_reply else 0,
+            "is_reply":        is_reply,
+            "parent_comment_id": parent_pk if is_reply else "",
+            "category":        category,
+            "sentiment":       analysis["sentiment"],
+            "language":        analysis["language"],
+            "is_hate_speech":  analysis["is_hate_speech"],
+            "is_toxic":        analysis["is_toxic"],
+            "is_sarcasm":      analysis.get("is_sarcasm", False),
+            "is_wellwish":     analysis.get("is_wellwish", False),
+            "hate_score":      analysis["hate_score"],
+            "hate_words":      analysis["hate_words"],
+            "toxic_words":     analysis["toxic_words"],
+            "positive_words":  analysis["positive_words"],
+            "negative_words":  analysis.get("negative_words", []),
+            "humor_words":     analysis["humor_words"],
+            "emojis":          analysis["emojis"],
+            "ml_confidence":   analysis.get("ml_confidence", 0.0),
+            "decision_source": analysis.get("decision_source", "rule"),
+            "vader_compound":  analysis.get("vader_compound", 0.0),
+        }
+        return entry
+
+    def _print_comment_line(self, entry: Dict, i: int):
+        if entry["is_hate_speech"]:
+            label = Fore.RED     + "🚨 HATE "
+        elif entry["is_toxic"]:
+            label = Fore.YELLOW  + "⚠️  TOXIC"
+        elif entry["category"] == "POSITIVE":
+            label = Fore.GREEN   + "😊 POS  "
+        elif entry["category"] == "NEGATIVE":
+            label = Fore.MAGENTA + "😞 NEG  "
+        elif entry["category"] == "HUMOR":
+            label = Fore.CYAN    + "😂 HUMOR"
+        else:
+            label = Fore.WHITE   + "💬 NEU  "
+
+        indicators = []
+        if entry.get("is_sarcasm"):
+            indicators.append("🎭")
+        if entry.get("is_wellwish"):
+            indicators.append("🙏")
+        ind_str = "".join(indicators)
+
+        preview = entry["text"][:55].replace("\n", " ")
+        likes = entry.get("like_count", 0)
+        likes_str = f" [{likes}❤]" if likes > 0 else ""
+        rc_str = f" 💬{entry['reply_count']}" if entry.get("reply_count", 0) > 0 else ""
+        print(f"{label} #{i:3d} {ind_str} @{entry['username'][:18]}: {preview}{likes_str}{rc_str}")
+
+    def _print_reply_line(self, entry: Dict, j: int):
+        if entry["is_hate_speech"]:
+            label = Fore.RED     + "🚨"
+        elif entry["is_toxic"]:
+            label = Fore.YELLOW  + "⚠️"
+        elif entry["category"] == "POSITIVE":
+            label = Fore.GREEN   + "😊"
+        elif entry["category"] == "NEGATIVE":
+            label = Fore.MAGENTA + "😞"
+        elif entry["category"] == "HUMOR":
+            label = Fore.CYAN    + "😂"
+        else:
+            label = Fore.WHITE   + "💬"
+
+        preview = entry["text"][:45].replace("\n", " ")
+        likes = entry.get("like_count", 0)
+        likes_str = f" [{likes}❤]" if likes > 0 else ""
+        print(f"        ↳ {label} #{j:2d} @{entry['username'][:15]}: {preview}{likes_str}")
+
+    # ── SUMMARY ───────────
 
     def _summarize(self, comments: List[Dict], post_data: Optional[Dict] = None) -> Dict:
         if not comments:
@@ -1117,6 +1289,10 @@ class InstagramScraperV16:
         wellwish_count = 0
         decision_sources: Counter = Counter()
         ml_confidences = []
+
+        # Stats khusus replies
+        total_replies = 0
+        replies_counts = {k: 0 for k in ("HATE_SPEECH", "TOXIC", "POSITIVE", "NEGATIVE", "NEUTRAL", "HUMOR")}
 
         for c in comments:
             cat = c.get("category", "NEUTRAL")
@@ -1147,6 +1323,13 @@ class InstagramScraperV16:
             if mlc > 0:
                 ml_confidences.append(mlc)
 
+            # Hitung sentimen di replies
+            for r in c.get("replies", []) or []:
+                total_replies += 1
+                rcat = r.get("category", "NEUTRAL")
+                if rcat in replies_counts:
+                    replies_counts[rcat] += 1
+
         sorted_by_likes = sorted(comments, key=lambda x: x.get("like_count", 0), reverse=True)
         top_likes = [{
             "username": c["username"],
@@ -1168,10 +1351,14 @@ class InstagramScraperV16:
         def pct(n):
             return round(n / total * 100, 1)
 
+        def pct_replies(n):
+            return round(n / total_replies * 100, 1) if total_replies > 0 else 0.0
+
         avg_confidence = round(sum(ml_confidences) / len(ml_confidences), 3) if ml_confidences else 0.0
 
         s = {
             "total_comments":       total,
+            "total_replies":        total_replies,
             "hate_speech_count":    counts["HATE_SPEECH"], "hate_percentage":     pct(counts["HATE_SPEECH"]),
             "toxic_count":          counts["TOXIC"],       "toxic_percentage":    pct(counts["TOXIC"]),
             "positive_count":       counts["POSITIVE"],    "positive_percentage": pct(counts["POSITIVE"]),
@@ -1188,6 +1375,20 @@ class InstagramScraperV16:
             "top_hate_liked":       [{"username": c["username"], "text": c["text"][:150],
                                        "like_count": c.get("like_count", 0)} for c in top_hate],
             "most_active_users":    most_active,
+            "replies_sentiment_breakdown": {
+                "positive_count":   replies_counts["POSITIVE"],
+                "negative_count":   replies_counts["NEGATIVE"],
+                "neutral_count":    replies_counts["NEUTRAL"],
+                "humor_count":      replies_counts["HUMOR"],
+                "toxic_count":      replies_counts["TOXIC"],
+                "hate_speech_count":replies_counts["HATE_SPEECH"],
+                "positive_percentage":   pct_replies(replies_counts["POSITIVE"]),
+                "negative_percentage":   pct_replies(replies_counts["NEGATIVE"]),
+                "neutral_percentage":    pct_replies(replies_counts["NEUTRAL"]),
+                "humor_percentage":      pct_replies(replies_counts["HUMOR"]),
+                "toxic_percentage":      pct_replies(replies_counts["TOXIC"]),
+                "hate_percentage":       pct_replies(replies_counts["HATE_SPEECH"]),
+            },
         }
 
         if post_data:
@@ -1195,23 +1396,34 @@ class InstagramScraperV16:
 
         # Print ringkasan
         print(Fore.CYAN + "\n" + "=" * 55)
-        print(Fore.CYAN + "📊 RINGKASAN SENTIMEN")
+        print(Fore.CYAN + "📊 RINGKASAN SENTIMEN (PARENT)")
         print(Fore.CYAN + "=" * 55)
         print(f"  💬 Total komentar     : {total}")
+        if total_replies > 0:
+            print(f"  💬 Total balasan      : {total_replies}")
         print(Fore.RED     + f"  🚨 Hate Speech        : {counts['HATE_SPEECH']:>4} ({pct(counts['HATE_SPEECH']):>5}%)")
         print(Fore.YELLOW  + f"  ⚠️  Toxic             : {counts['TOXIC']:>4} ({pct(counts['TOXIC']):>5}%)")
         print(Fore.GREEN   + f"  😊 Positif            : {counts['POSITIVE']:>4} ({pct(counts['POSITIVE']):>5}%)")
         print(Fore.MAGENTA + f"  😞 Negatif            : {counts['NEGATIVE']:>4} ({pct(counts['NEGATIVE']):>5}%)")
         print(Fore.WHITE   + f"  😐 Netral             : {counts['NEUTRAL']:>4} ({pct(counts['NEUTRAL']):>5}%)")
         print(Fore.CYAN    + f"  😂 Humor              : {counts['HUMOR']:>4} ({pct(counts['HUMOR']):>5}%)")
-        print(Fore.CYAN    + f"\n  🎭 Sarkasme terdeteksi : {sarcasm_count:>4} ({pct(sarcasm_count):>5}%)")
-        print(Fore.CYAN    + f"  🙏 Doa baik / wellwish : {wellwish_count:>4} ({pct(wellwish_count):>5}%)")
+
+        if total_replies > 0:
+            print(Fore.CYAN + "\n" + "=" * 55)
+            print(Fore.CYAN + "📊 RINGKASAN SENTIMEN (BALASAN)")
+            print(Fore.CYAN + "=" * 55)
+            print(Fore.GREEN   + f"  😊 Positif            : {replies_counts['POSITIVE']:>4} ({pct_replies(replies_counts['POSITIVE']):>5}%)")
+            print(Fore.MAGENTA + f"  😞 Negatif            : {replies_counts['NEGATIVE']:>4} ({pct_replies(replies_counts['NEGATIVE']):>5}%)")
+            print(Fore.WHITE   + f"  😐 Netral             : {replies_counts['NEUTRAL']:>4} ({pct_replies(replies_counts['NEUTRAL']):>5}%)")
+            print(Fore.CYAN    + f"  😂 Humor              : {replies_counts['HUMOR']:>4} ({pct_replies(replies_counts['HUMOR']):>5}%)")
+            print(Fore.YELLOW  + f"  ⚠️  Toxic             : {replies_counts['TOXIC']:>4} ({pct_replies(replies_counts['TOXIC']):>5}%)")
+            print(Fore.RED     + f"  🚨 Hate Speech        : {replies_counts['HATE_SPEECH']:>4} ({pct_replies(replies_counts['HATE_SPEECH']):>5}%)")
+
+        print(Fore.CYAN    + f"\n  🎭 Sarkasme           : {sarcasm_count:>4} ({pct(sarcasm_count):>5}%)")
+        print(Fore.CYAN    + f"  🙏 Wellwish           : {wellwish_count:>4} ({pct(wellwish_count):>5}%)")
 
         if avg_confidence > 0:
             print(Fore.CYAN + f"\n  🎯 Avg ML confidence  : {avg_confidence:.1%}")
-            print(Fore.CYAN + f"  📊 Decision sources   :")
-            for src, cnt in decision_sources.most_common():
-                print(f"      {src:<30} {cnt:>4}")
 
         if post_data:
             print(Fore.CYAN + "\n" + "=" * 55)
@@ -1222,38 +1434,16 @@ class InstagramScraperV16:
             print(Fore.CYAN + f"  ❤️  Likes       : {post_data.get('likes', 0):>10,}")
             if post_data.get("video_views", 0) > 0:
                 print(Fore.CYAN + f"  👁️  Video views : {post_data.get('video_views', 0):>10,}")
-            if post_data.get("play_count", 0) > 0:
-                print(Fore.CYAN + f"  ▶️  Play count  : {post_data.get('play_count', 0):>10,}")
-            if post_data.get("shares_count", 0) > 0:
-                print(Fore.CYAN + f"  📤 Shares total : {post_data.get('shares_count', 0):>10,}")
-                if post_data.get("direct_send_count", 0):
-                    print(Fore.CYAN + f"     ↳ via DM    : {post_data.get('direct_send_count', 0):>10,}")
-                if post_data.get("reshare_count", 0):
-                    print(Fore.CYAN + f"     ↳ ke Story  : {post_data.get('reshare_count', 0):>10,}")
             if post_data.get("saves_count", 0) > 0:
                 print(Fore.CYAN + f"  🔖 Saves        : {post_data.get('saves_count', 0):>10,}")
             print(Fore.CYAN + f"  💬 Komentar     : {total:>10,}")
-
-            likes = post_data.get("likes", 0)
-            views = post_data.get("video_views", 0)
-            if views > 0 and likes > 0:
-                er = likes / views * 100
-                print(Fore.CYAN + f"\n  📊 Engagement rate (likes/views): {er:.2f}%")
-
-        if top_likes:
-            print(Fore.CYAN + "\n🔥 Top 3 komentar paling banyak likes:")
-            for tc in top_likes[:3]:
-                cat_color = Fore.GREEN if tc['category'] == "POSITIVE" else \
-                            Fore.MAGENTA if tc['category'] == "NEGATIVE" else \
-                            Fore.RED if tc['category'] == "HATE_SPEECH" else Fore.WHITE
-                print(f"   {tc['like_count']:>5}❤ {cat_color}[{tc['category']:<10}]{Fore.WHITE} "
-                      f"@{tc['username']}: {tc['text'][:60]}")
+            if total_replies > 0:
+                print(Fore.CYAN + f"  💬 Balasan      : {total_replies:>10,}")
 
         if hate_ex:
             print(Fore.RED + f"\n🚨 Contoh hate speech ({len(hate_ex)} total):")
             for he in hate_ex[:3]:
                 print(f"   @{he['username']}: {he['text'][:70]}")
-                print(f"      └─ words: {he['hate_words']}")
 
         return s
 
@@ -1281,10 +1471,8 @@ class InstagramScraperV16:
 
     def run(self):
         print(Fore.CYAN + "\n" + "=" * 70)
-        print(Fore.CYAN + "  INSTAGRAM SCRAPER V16.1 PLAYWRIGHT + Sentiment V2")
-        print(Fore.CYAN + "  GraphQL → CDP → REST  |  IndoBERT + Sarcasm Detection")
-        print(Fore.CYAN + "  + Shares / Saves / Video Views / Play Count")
-        print(Fore.CYAN + "  [Powered by Playwright Persistent Context]")
+        print(Fore.CYAN + "  INSTAGRAM SCRAPER V16.2 PLAYWRIGHT + Sentiment V2")
+        print(Fore.CYAN + "  GraphQL → CDP → REST  |  + REPLIES (child_comments)")
         print(Fore.CYAN + "=" * 70)
 
         while True:
@@ -1302,14 +1490,20 @@ class InstagramScraperV16:
                 raw = input(f"Max komentar [{MAX_COMMENTS}]: ").strip()
                 max_c = int(raw) if raw.isdigit() else MAX_COMMENTS
 
+                raw_inc = input(f"Sertakan balasan? [Y/n]: ").strip().lower()
+                inc_replies = raw_inc not in ("n", "no", "0")
+
+                raw_mr = input(f"Max balasan per komentar [{MAX_REPLIES_PER_COMMENT}]: ").strip()
+                max_r = int(raw_mr) if raw_mr.isdigit() else MAX_REPLIES_PER_COMMENT
+
                 t_start = time.time()
-                result = self.scrape_post_comments(url, max_c)
+                result = self.scrape_post_comments(url, max_c, inc_replies, max_r)
                 t_elapsed = time.time() - t_start
 
                 print(Fore.CYAN + f"\n⏱️  Waktu total: {t_elapsed:.1f} detik")
-                if result.get("comments_count", 0) > 0:
-                    rate = result["comments_count"] / t_elapsed
-                    print(Fore.CYAN + f"📈 Rate: {rate:.1f} komentar/detik")
+                total_items = result.get("comments_count", 0) + result.get("replies_count", 0)
+                if total_items > 0:
+                    print(Fore.CYAN + f"📈 Rate: {total_items / t_elapsed:.1f} item/detik")
 
                 self.save(result, f"instagram_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
 
@@ -1329,10 +1523,16 @@ class InstagramScraperV16:
                 raw = input(f"Max komentar per post [{MAX_COMMENTS}]: ").strip()
                 max_c = int(raw) if raw.isdigit() else MAX_COMMENTS
 
+                raw_inc = input(f"Sertakan balasan? [Y/n]: ").strip().lower()
+                inc_replies = raw_inc not in ("n", "no", "0")
+
+                raw_mr = input(f"Max balasan per komentar [{MAX_REPLIES_PER_COMMENT}]: ").strip()
+                max_r = int(raw_mr) if raw_mr.isdigit() else MAX_REPLIES_PER_COMMENT
+
                 t_total = time.time()
                 for idx, url in enumerate(urls, 1):
                     print(Fore.CYAN + f"\n[{idx}/{len(urls)}]")
-                    result = self.scrape_post_comments(url, max_c)
+                    result = self.scrape_post_comments(url, max_c, inc_replies, max_r)
                     self.save(result, f"instagram_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{idx}.json")
                     if idx < len(urls):
                         d = DELAY_BETWEEN_REQUESTS + random.randint(3, 8)

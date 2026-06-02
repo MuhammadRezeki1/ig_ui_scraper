@@ -51,10 +51,32 @@ export interface Comment {
   ml_confidence: number
   decision_source: string
   vader_compound: number
+
+  // ── BARU: replies (child_comments) ──
+  is_reply?: boolean
+  parent_comment_id?: string
+  replies?: Comment[]
+  replies_fetched?: number
+}
+
+export interface RepliesSentimentBreakdown {
+  positive_count: number
+  negative_count: number
+  neutral_count: number
+  humor_count: number
+  toxic_count: number
+  hate_speech_count: number
+  positive_percentage: number
+  negative_percentage: number
+  neutral_percentage: number
+  humor_percentage: number
+  toxic_percentage: number
+  hate_percentage: number
 }
 
 export interface SentimentSummary {
   total_comments: number
+  total_replies?: number
   hate_speech_count: number
   hate_percentage: number
   toxic_count: number
@@ -76,6 +98,7 @@ export interface SentimentSummary {
   hate_examples: HateExample[]
   most_active_users: ActiveUser[]
   engagement?: EngagementSummary
+  replies_sentiment_breakdown?: RepliesSentimentBreakdown
 }
 
 export interface TopComment {
@@ -119,6 +142,9 @@ export interface PostResult {
   saves_count: number
   comments: Comment[]
   comments_count: number
+  replies_count?: number          // ── BARU
+  include_replies?: boolean       // ── BARU
+  max_replies_per_comment?: number // ── BARU
   sentiment_summary: SentimentSummary
   _meta?: { saved_file?: string; elapsed_seconds?: number }
 }
@@ -168,4 +194,40 @@ export interface HealthData {
   engine_dir: string
   output_dir: string
   engine_files_found: boolean
+}
+
+// ── Follower / Following Item ───────────────────────────────
+export interface FollowerItem {
+  username: string
+  full_name: string
+  user_id: string
+  is_verified: boolean
+  is_private: boolean
+  profile_pic_url: string
+}
+
+export interface FollowerListResult {
+  username: string
+  kind: 'followers' | 'following' | 'following_verified'
+  scraped_at: string
+  scraped_date: string
+  success: boolean
+  count: number
+  items: FollowerItem[]
+  total_scanned?: number
+  error: string
+  _meta?: { saved_file?: string; elapsed_seconds?: number }
+}
+
+export interface FollowingVerifiedResult {
+  username: string
+  kind: 'following_verified'
+  scraped_at: string
+  scraped_date: string
+  success: boolean
+  count: number
+  total_scanned: number
+  items: FollowerItem[]
+  error: string
+  _meta?: { saved_file?: string; elapsed_seconds?: number }
 }
