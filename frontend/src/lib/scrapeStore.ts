@@ -10,7 +10,7 @@
 //    jadi tidak memulai ulang, hanya menampilkan peringatan.
 // ------------------------------------------------------------------
 
-export type ScrapeKind = 'single' | 'batch' | 'profile' | null
+export type ScrapeKind = 'single' | 'batch' | 'unified' | 'profile' | 'followers' | 'following' | null
 
 interface ScrapeState {
   isScraping: boolean

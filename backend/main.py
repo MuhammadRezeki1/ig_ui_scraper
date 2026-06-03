@@ -1,24 +1,27 @@
 """
 main.py — FastAPI Backend untuk Instagram Scraper
-Versi: + REPLIES (child_comments) support
+Versi: V16.3 + Unified Scrape + Aggressive Likers + Replies + Download JSON/CSV
 """
 import os
 import re
 import sys
+import csv
 import json
 import time
 import subprocess
 import tempfile
 import traceback
+import io
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 # ── PATH SETUP ──────────────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 ENGINE_DIR = os.path.join(BASE_DIR, "engine")
 OUTPUT_DIR = os.path.join(ENGINE_DIR, "output")
 
@@ -26,26 +29,24 @@ sys.path.insert(0, ENGINE_DIR)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ── APP ──────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Instagram Scraper API", version="1.1.0")
+app = FastAPI(title="Instagram Scraper API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ── MODELS ───────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# MODELS
+# ════════════════════════════════════════════════════════════════════════════
 
 class ScrapePostRequest(BaseModel):
     url: str
     max_comments: int = 100
-    # ── BARU ─────────────────────────────────────────
     include_replies: bool = True
     max_replies_per_comment: int = 20
 
@@ -53,9 +54,34 @@ class ScrapePostsRequest(BaseModel):
     urls: List[str]
     max_comments: int = 100
     delay_between: int = 8
-    # ── BARU ─────────────────────────────────────────
     include_replies: bool = True
     max_replies_per_comment: int = 20
+
+class ScrapePostLikersRequest(BaseModel):
+    url: str
+    max_likers: int = 0                    # 0 = ambil semua
+    aggressive_likers: bool = False        # True = jeda lebih pendek, push 1000+
+    checkpoint_size: int = 200
+    checkpoint_delay_min: int = 8
+    checkpoint_delay_max: int = 15
+    page_delay_min: float = 1.5
+    page_delay_max: float = 3.0
+
+class ScrapeUnifiedRequest(BaseModel):
+    url: str
+    # Comments
+    max_comments: int = 100
+    include_replies: bool = True
+    max_replies_per_comment: int = 20
+    # Likers
+    scrape_likers: bool = True
+    max_likers: int = 1000
+    aggressive_likers: bool = False
+    checkpoint_size: int = 200
+    checkpoint_delay_min: int = 8
+    checkpoint_delay_max: int = 15
+    page_delay_min: float = 1.5
+    page_delay_max: float = 3.0
 
 class ScrapeProfileRequest(BaseModel):
     username: str
@@ -73,26 +99,46 @@ class ScrapeFollowingVerifiedRequest(BaseModel):
     username: str
     max_count: int = 500
 
+class ScrapeProfilePostsRequest(BaseModel):
+    username: str
+    date_from: Optional[str] = None
+    date_to:   Optional[str] = None
+    max_posts: int = 50
+    include_comments: bool = False
+    max_comments_per_post: int = 20
+    max_replies_per_comment: int = 5
+
 class LoginCookieRequest(BaseModel):
     cookies_json: str
 
+class DownloadCommentsInlineRequest(BaseModel):
+    comments: List[Any] = []
+    include_replies: bool = True
+    filename_hint: str = "comments"
 
-# ── HELPERS ──────────────────────────────────────────────────────────────────
+class DownloadLikersInlineRequest(BaseModel):
+    likers: List[Any] = []
+    filename_hint: str = "likers"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ════════════════════════════════════════════════════════════════════════════
 
 def success(data: dict, message: str = "Success"):
     return {
-        "success": True,
-        "message": message,
+        "success":   True,
+        "message":   message,
         "timestamp": datetime.now().isoformat(),
-        "data": data,
+        "data":      data,
     }
 
 def failure(message: str, data: Optional[dict] = None):
     return {
-        "success": False,
-        "message": message,
+        "success":   False,
+        "message":   message,
         "timestamp": datetime.now().isoformat(),
-        "data": data or {},
+        "data":      data or {},
     }
 
 
@@ -126,16 +172,65 @@ def save_json_output(data: dict, filename: str) -> str:
     return safe_name
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# SUBPROCESS RUNNERS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _run_subprocess(script: str, timeout: int) -> dict:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(script)
+        script_path = f.name
+
+    try:
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"]       = "1"
+
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=ENGINE_DIR,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+
+        out = result.stdout or ""
+        if "___RESULT_START___" in out:
+            json_part = out.split("___RESULT_START___", 1)[1].strip()
+            for line in json_part.split("\n"):
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        return json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+        stderr_tail = (result.stderr or "")[-1200:]
+        stdout_tail = out[-600:]
+        raise Exception(
+            f"Tidak ada output JSON valid (returncode={result.returncode}).\n"
+            f"STDERR: {stderr_tail}\n"
+            f"STDOUT: {stdout_tail}"
+        )
+
+    finally:
+        try:
+            os.unlink(script_path)
+        except Exception:
+            pass
+
+
 def run_post_scraper(
     url: str,
     max_comments: int,
     include_replies: bool = True,
     max_replies_per_comment: int = 20,
 ) -> dict:
-    """
-    Jalankan post scraper sebagai subprocess. Param tambahan
-    untuk fetch replies (child_comments).
-    """
     script = f"""
 import sys
 sys.path.insert(0, r'{ENGINE_DIR}')
@@ -153,6 +248,82 @@ with InstagramScraperV16() as scraper:
     print(json.dumps(result, ensure_ascii=False, default=str))
 """
     return _run_subprocess(script, timeout=600)
+
+
+def run_unified_scraper(
+    url: str,
+    max_comments: int,
+    include_replies: bool,
+    max_replies_per_comment: int,
+    scrape_likers: bool,
+    max_likers: int,
+    aggressive_likers: bool,
+    checkpoint_size: int,
+    checkpoint_delay_min: int,
+    checkpoint_delay_max: int,
+    page_delay_min: float,
+    page_delay_max: float,
+) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from scraper_post import InstagramScraperV16
+import json
+
+with InstagramScraperV16() as scraper:
+    result = scraper.scrape_post_unified(
+        {json.dumps(url)},
+        max_comments={max_comments},
+        include_replies={include_replies},
+        max_replies_per_comment={max_replies_per_comment},
+        scrape_likers={scrape_likers},
+        max_likers={max_likers},
+        aggressive_likers={aggressive_likers},
+        checkpoint_size={checkpoint_size},
+        checkpoint_delay_min={checkpoint_delay_min},
+        checkpoint_delay_max={checkpoint_delay_max},
+        page_delay_min={page_delay_min},
+        page_delay_max={page_delay_max},
+    )
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    # unified dengan likers bisa makan waktu lama — timeout lebih besar
+    timeout = 7200 if scrape_likers else 600
+    return _run_subprocess(script, timeout=timeout)
+
+
+def run_likers_scraper(
+    url: str,
+    max_likers: int,
+    aggressive_likers: bool,
+    checkpoint_size: int,
+    checkpoint_delay_min: int,
+    checkpoint_delay_max: int,
+    page_delay_min: float,
+    page_delay_max: float,
+) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from scraper_post import InstagramScraperV16
+import json
+
+with InstagramScraperV16() as scraper:
+    result = scraper.scrape_post_likers(
+        {json.dumps(url)},
+        max_likers={max_likers},
+        aggressive_likers={aggressive_likers},
+        checkpoint_size={checkpoint_size},
+        checkpoint_delay_min={checkpoint_delay_min},
+        checkpoint_delay_max={checkpoint_delay_max},
+        page_delay_min={page_delay_min},
+        page_delay_max={page_delay_max},
+    )
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    return _run_subprocess(script, timeout=7200)
 
 
 def run_profile_scraper(username: str) -> dict:
@@ -215,71 +386,167 @@ with InstagramProfileScraper() as scraper:
     return _run_subprocess(script, timeout=1800)
 
 
-def _run_subprocess(script: str, timeout: int) -> dict:
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False, encoding="utf-8"
-    ) as f:
-        f.write(script)
-        script_path = f.name
+def run_profile_posts_scraper(
+    username: str,
+    date_from: Optional[str],
+    date_to: Optional[str],
+    max_posts: int,
+    include_comments: bool,
+    max_comments_per_post: int,
+    max_replies_per_comment: int,
+) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from profile_scraper import InstagramProfileScraper
+import json
 
-    try:
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUTF8"] = "1"
-
-        result = subprocess.run(
-            [sys.executable, script_path],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=ENGINE_DIR,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-        )
-
-        out = result.stdout or ""
-        if "___RESULT_START___" in out:
-            json_part = out.split("___RESULT_START___", 1)[1].strip()
-            for line in json_part.split("\n"):
-                line = line.strip()
-                if line.startswith("{"):
-                    try:
-                        return json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-
-        stderr_tail = (result.stderr or "")[-800:]
-        stdout_tail = out[-400:]
-        raise Exception(
-            f"Tidak ada output JSON valid (returncode={result.returncode}).\n"
-            f"STDERR: {stderr_tail}\n"
-            f"STDOUT: {stdout_tail}"
-        )
-
-    finally:
-        try:
-            os.unlink(script_path)
-        except Exception:
-            pass
+with InstagramProfileScraper() as scraper:
+    result = scraper.scrape_profile_posts(
+        {json.dumps(username)},
+        date_from={json.dumps(date_from)},
+        date_to={json.dumps(date_to)},
+        max_posts={max_posts},
+        include_comments={include_comments},
+        max_comments_per_post={max_comments_per_post},
+        max_replies_per_comment={max_replies_per_comment},
+    )
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    return _run_subprocess(script, timeout=1800)
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ENDPOINTS - HEALTH
+# DOWNLOAD HELPERS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _comments_to_csv_rows(comments: list, include_replies: bool = True) -> list:
+    rows = []
+    for c in comments:
+        rows.append({
+            "type":              "comment",
+            "number":            c.get("number", ""),
+            "username":          c.get("username", ""),
+            "text":              c.get("text", ""),
+            "comment_id":        c.get("comment_id", ""),
+            "like_count":        c.get("like_count", 0),
+            "reply_count":       c.get("reply_count", 0),
+            "created_at":        c.get("created_at", ""),
+            "category":          c.get("category", ""),
+            "sentiment":         c.get("sentiment", ""),
+            "language":          c.get("language", ""),
+            "is_hate_speech":    c.get("is_hate_speech", False),
+            "is_toxic":          c.get("is_toxic", False),
+            "is_sarcasm":        c.get("is_sarcasm", False),
+            "is_wellwish":       c.get("is_wellwish", False),
+            "hate_score":        c.get("hate_score", 0),
+            "ml_confidence":     c.get("ml_confidence", 0),
+            "vader_compound":    c.get("vader_compound", 0),
+            "decision_source":   c.get("decision_source", ""),
+            "hate_words":        "|".join(c.get("hate_words", []) or []),
+            "toxic_words":       "|".join(c.get("toxic_words", []) or []),
+            "positive_words":    "|".join(c.get("positive_words", []) or []),
+            "negative_words":    "|".join(c.get("negative_words", []) or []),
+            "humor_words":       "|".join(c.get("humor_words", []) or []),
+            "emojis":            "|".join(c.get("emojis", []) or []),
+            "parent_comment_id": "",
+        })
+        if include_replies:
+            for r in c.get("replies", []) or []:
+                rows.append({
+                    "type":              "reply",
+                    "number":            r.get("number", ""),
+                    "username":          r.get("username", ""),
+                    "text":              r.get("text", ""),
+                    "comment_id":        r.get("comment_id", ""),
+                    "like_count":        r.get("like_count", 0),
+                    "reply_count":       0,
+                    "created_at":        r.get("created_at", ""),
+                    "category":          r.get("category", ""),
+                    "sentiment":         r.get("sentiment", ""),
+                    "language":          r.get("language", ""),
+                    "is_hate_speech":    r.get("is_hate_speech", False),
+                    "is_toxic":          r.get("is_toxic", False),
+                    "is_sarcasm":        r.get("is_sarcasm", False),
+                    "is_wellwish":       r.get("is_wellwish", False),
+                    "hate_score":        r.get("hate_score", 0),
+                    "ml_confidence":     r.get("ml_confidence", 0),
+                    "vader_compound":    r.get("vader_compound", 0),
+                    "decision_source":   r.get("decision_source", ""),
+                    "hate_words":        "|".join(r.get("hate_words", []) or []),
+                    "toxic_words":       "|".join(r.get("toxic_words", []) or []),
+                    "positive_words":    "|".join(r.get("positive_words", []) or []),
+                    "negative_words":    "|".join(r.get("negative_words", []) or []),
+                    "humor_words":       "|".join(r.get("humor_words", []) or []),
+                    "emojis":            "|".join(r.get("emojis", []) or []),
+                    "parent_comment_id": r.get("parent_comment_id", ""),
+                })
+    return rows
+
+
+def _likers_to_csv_rows(likers: list) -> list:
+    return [{
+        "no":              i + 1,
+        "user_id":         l.get("user_id", ""),
+        "username":        l.get("username", ""),
+        "full_name":       l.get("full_name", ""),
+        "is_verified":     l.get("is_verified", False),
+        "is_private":      l.get("is_private", False),
+        "profile_url":     f"https://www.instagram.com/{l.get('username', '')}/",
+    } for i, l in enumerate(likers)]
+
+
+COMMENT_CSV_FIELDS = [
+    "type", "number", "username", "text", "comment_id",
+    "like_count", "reply_count", "created_at",
+    "category", "sentiment", "language",
+    "is_hate_speech", "is_toxic", "is_sarcasm", "is_wellwish",
+    "hate_score", "ml_confidence", "vader_compound", "decision_source",
+    "hate_words", "toxic_words", "positive_words", "negative_words",
+    "humor_words", "emojis", "parent_comment_id",
+]
+
+LIKER_CSV_FIELDS = [
+    "no", "user_id", "username", "full_name",
+    "is_verified", "is_private", "profile_url",
+]
+
+
+def _rows_to_csv_bytes(rows: list, fieldnames: list) -> bytes:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue().encode("utf-8-sig")   # utf-8-sig agar Excel bisa baca
+
+
+def _validate_json_filename(filename: str):
+    if "/" in filename or "\\" in filename or not filename.endswith(".json"):
+        raise HTTPException(400, "Nama file tidak valid")
+    fp = os.path.join(OUTPUT_DIR, filename)
+    if not os.path.exists(fp):
+        raise HTTPException(404, f"File '{filename}' tidak ditemukan")
+    return fp
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS — HEALTH
 # ════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/health")
 def health():
     return success({
-        "api": "running",
-        "engine_dir": ENGINE_DIR,
-        "output_dir": OUTPUT_DIR,
+        "api":                "running",
+        "version":            "2.0.0",
+        "engine_dir":         ENGINE_DIR,
+        "output_dir":         OUTPUT_DIR,
         "engine_files_found": os.path.exists(os.path.join(ENGINE_DIR, "scraper_post.py")),
     }, "FastAPI backend running")
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ENDPOINTS - AUTH
+# ENDPOINTS — AUTH
 # ════════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/auth/cookies")
@@ -292,9 +559,9 @@ def save_cookies(req: LoginCookieRequest):
             raise HTTPException(400, f"Cookie wajib hilang: {', '.join(missing)}")
         payload = sm.save_session(cookies)
         return success({
-            "user_id": payload.get("user_id"),
+            "user_id":      payload.get("user_id"),
             "cookie_count": payload.get("cookie_count"),
-            "saved_at": payload.get("saved_at"),
+            "saved_at":     payload.get("saved_at"),
         }, "Cookies berhasil disimpan")
     except HTTPException:
         raise
@@ -309,19 +576,44 @@ def session_info():
         s = sm.load_session()
         if not s:
             return success({"has_session": False, "user_id": None}, "Belum login")
-        expired = sm.is_session_expired(s)
+        expired  = sm.is_session_expired(s)
         is_valid, missing, _ = sm.validate_cookies(s.get("cookies", []))
         return success({
-            "has_session": True,
-            "user_id": s.get("user_id"),
-            "cookie_count": s.get("cookie_count"),
-            "saved_at": s.get("saved_at"),
-            "is_expired": expired,
-            "is_valid": is_valid,
+            "has_session":     True,
+            "user_id":         s.get("user_id"),
+            "cookie_count":    s.get("cookie_count"),
+            "saved_at":        s.get("saved_at"),
+            "is_expired":      expired,
+            "is_valid":        is_valid,
             "missing_cookies": missing,
         }, "Session info retrieved")
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+@app.get("/api/auth/status")
+def auth_status():
+    try:
+        import session_manager as sm
+        s = sm.load_session()
+        has_session = s is not None
+        is_valid = False
+        if has_session:
+            is_valid, _, _ = sm.validate_cookies(s.get("cookies", []))
+        return success({
+            "is_running":      False,
+            "login_detected":  has_session,
+            "username":        s.get("username") if s else None,
+            "is_logged_in":    has_session and is_valid,
+            "profile_exists":  os.path.exists(os.path.join(ENGINE_DIR, "chrome_profile_playwright")),
+        }, "Auth status retrieved")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/auth/login")
+def trigger_login():
+    return success({"triggered": True}, "Login helper perlu dijalankan manual")
 
 
 @app.post("/api/auth/logout")
@@ -335,7 +627,7 @@ def logout():
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ENDPOINTS - SCRAPE
+# ENDPOINTS — SCRAPE POST (komentar + balasan only)
 # ════════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/scrape/post")
@@ -354,7 +646,6 @@ def scrape_post(req: ScrapePostRequest):
         save_json_output(result, filename)
 
         result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": filename}
-        total_items = result.get("comments_count", 0) + result.get("replies_count", 0)
         msg = (
             f"Scraped {result.get('comments_count', 0)} comments + "
             f"{result.get('replies_count', 0)} replies in {elapsed}s"
@@ -367,7 +658,7 @@ def scrape_post(req: ScrapePostRequest):
 
 @app.post("/api/scrape/posts/batch")
 def scrape_posts_batch(req: ScrapePostsRequest):
-    import random
+    import random as _random
     results = []
     t0 = time.time()
     for i, url in enumerate(req.urls):
@@ -382,14 +673,14 @@ def scrape_posts_batch(req: ScrapePostsRequest):
         except Exception as e:
             results.append({"url": url, "success": False, "error": str(e)})
         if i < len(req.urls) - 1:
-            time.sleep(req.delay_between + random.randint(1, 3))
+            time.sleep(req.delay_between + _random.randint(1, 3))
 
     summary = {
-        "total": len(req.urls),
-        "success": sum(1 for r in results if r["success"]),
-        "failed": sum(1 for r in results if not r["success"]),
+        "total":           len(req.urls),
+        "success":         sum(1 for r in results if r["success"]),
+        "failed":          sum(1 for r in results if not r["success"]),
         "elapsed_seconds": round(time.time() - t0, 2),
-        "results": results,
+        "results":         results,
     }
     filename = f"api_batch_posts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     save_json_output(summary, filename)
@@ -397,13 +688,266 @@ def scrape_posts_batch(req: ScrapePostsRequest):
     return success(summary, f"Batch: {summary['success']}/{summary['total']} success")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS — UNIFIED SCRAPE (komentar + balasan + likers sekaligus)
+# ════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/scrape/post/unified")
+def scrape_post_unified(req: ScrapeUnifiedRequest):
+    """
+    Unified scrape: ambil komentar + balasan + likers dalam satu sesi browser.
+    Lebih efisien karena tidak perlu buka halaman dua kali.
+    """
+    try:
+        t0 = time.time()
+        result = run_unified_scraper(
+            req.url,
+            req.max_comments,
+            req.include_replies,
+            req.max_replies_per_comment,
+            req.scrape_likers,
+            req.max_likers,
+            req.aggressive_likers,
+            req.checkpoint_size,
+            req.checkpoint_delay_min,
+            req.checkpoint_delay_max,
+            req.page_delay_min,
+            req.page_delay_max,
+        )
+        elapsed = round(time.time() - t0, 2)
+
+        filename = f"api_unified_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        save_json_output(result, filename)
+
+        result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": filename}
+        msg = (
+            f"Unified scraped: {result.get('comments_count', 0)} comments + "
+            f"{result.get('replies_count', 0)} replies + "
+            f"{result.get('likers_fetched', 0)} likers in {elapsed}s"
+        )
+        return success(result, msg)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"Unified scrape failed: {str(e)}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS — SCRAPE LIKERS (standalone)
+# ════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/scrape/post/likers")
+def scrape_post_likers(req: ScrapePostLikersRequest):
+    """
+    Scrape siapa saja yang like sebuah post Instagram.
+    aggressive_likers=True → jeda lebih pendek, bisa push ke 1000+ likers.
+    """
+    try:
+        t0 = time.time()
+        result = run_likers_scraper(
+            req.url,
+            req.max_likers,
+            req.aggressive_likers,
+            req.checkpoint_size,
+            req.checkpoint_delay_min,
+            req.checkpoint_delay_max,
+            req.page_delay_min,
+            req.page_delay_max,
+        )
+        elapsed = round(time.time() - t0, 2)
+
+        filename = f"api_likers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        save_json_output(result, filename)
+
+        result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": filename}
+        msg = (
+            f"Likers scraped: {result.get('likers_fetched', 0):,} "
+            f"dari {result.get('likes_count', 0):,} likes in {elapsed}s"
+        )
+        return success(result, msg)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"Likers scrape failed: {str(e)}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS — DOWNLOAD JSON
+# ════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/download/post/{filename}")
+def download_post_json(filename: str):
+    """Download hasil scrape post sebagai JSON."""
+    fp = _validate_json_filename(filename)
+    with open(fp, "r", encoding="utf-8") as f:
+        content = f.read()
+    return StreamingResponse(
+        io.BytesIO(content.encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/download/likers/{filename}")
+def download_likers_json(filename: str):
+    """Download hasil scrape likers sebagai JSON."""
+    fp = _validate_json_filename(filename)
+    with open(fp, "r", encoding="utf-8") as f:
+        content = f.read()
+    return StreamingResponse(
+        io.BytesIO(content.encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/download/unified/{filename}")
+def download_unified_json(filename: str):
+    """Download hasil unified scrape sebagai JSON."""
+    fp = _validate_json_filename(filename)
+    with open(fp, "r", encoding="utf-8") as f:
+        content = f.read()
+    return StreamingResponse(
+        io.BytesIO(content.encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS — DOWNLOAD CSV
+# ════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/download/post/{filename}/comments.csv")
+def download_post_comments_csv(
+    filename: str,
+    replies: bool = Query(True, description="Sertakan balasan (true/false)"),
+):
+    """
+    Download komentar (+ balasan opsional) dari hasil scrape post sebagai CSV.
+    ?replies=true  → sertakan balasan (default)
+    ?replies=false → hanya komentar utama
+    """
+    fp = _validate_json_filename(filename)
+    with open(fp, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    comments = data.get("comments", [])
+    rows = _comments_to_csv_rows(comments, include_replies=replies)
+    csv_bytes = _rows_to_csv_bytes(rows, COMMENT_CSV_FIELDS)
+    csv_filename = filename.replace(".json", "_comments.csv")
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{csv_filename}"'},
+    )
+
+
+@app.get("/api/download/likers/{filename}/likers.csv")
+def download_likers_csv(filename: str):
+    """Download daftar likers sebagai CSV."""
+    fp = _validate_json_filename(filename)
+    with open(fp, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    likers = data.get("likers", [])
+    rows = _likers_to_csv_rows(likers)
+    csv_bytes = _rows_to_csv_bytes(rows, LIKER_CSV_FIELDS)
+    csv_filename = filename.replace(".json", "_likers.csv")
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{csv_filename}"'},
+    )
+
+
+@app.get("/api/download/unified/{filename}/comments.csv")
+def download_unified_comments_csv(
+    filename: str,
+    replies: bool = Query(True),
+):
+    """Download komentar dari hasil unified scrape sebagai CSV."""
+    fp = _validate_json_filename(filename)
+    with open(fp, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    comments = data.get("comments", [])
+    rows = _comments_to_csv_rows(comments, include_replies=replies)
+    csv_bytes = _rows_to_csv_bytes(rows, COMMENT_CSV_FIELDS)
+    csv_filename = filename.replace(".json", "_comments.csv")
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{csv_filename}"'},
+    )
+
+
+@app.get("/api/download/unified/{filename}/likers.csv")
+def download_unified_likers_csv(filename: str):
+    """Download likers dari hasil unified scrape sebagai CSV."""
+    fp = _validate_json_filename(filename)
+    with open(fp, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    likers = data.get("likers", [])
+    rows = _likers_to_csv_rows(likers)
+    csv_bytes = _rows_to_csv_bytes(rows, LIKER_CSV_FIELDS)
+    csv_filename = filename.replace(".json", "_likers.csv")
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{csv_filename}"'},
+    )
+
+
+# ── Download inline (data langsung dari client, tidak perlu filename) ───────
+
+@app.post("/api/download/comments-csv")
+def download_comments_csv_inline(req: DownloadCommentsInlineRequest):
+    """
+    Terima data post langsung dari client, return CSV komentar.
+    Tidak perlu ada file yang tersimpan di server.
+    """
+    rows = _comments_to_csv_rows(req.comments, include_replies=req.include_replies)
+    csv_bytes = _rows_to_csv_bytes(rows, COMMENT_CSV_FIELDS)
+    fname = sanitize_filename(f"{req.filename_hint}_comments.csv")
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@app.post("/api/download/likers-csv")
+def download_likers_csv_inline(req: DownloadLikersInlineRequest):
+    """
+    Terima data likers langsung dari client, return CSV.
+    Tidak perlu ada file yang tersimpan di server.
+    """
+    rows = _likers_to_csv_rows(req.likers)
+    csv_bytes = _rows_to_csv_bytes(rows, LIKER_CSV_FIELDS)
+    fname = sanitize_filename(f"{req.filename_hint}_likers.csv")
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS — SCRAPE PROFILE
+# ════════════════════════════════════════════════════════════════════════════
+
 @app.post("/api/scrape/profile")
 def scrape_profile(req: ScrapeProfileRequest):
     username = extract_username(req.username)
     if not username:
         return failure(
-            f"Tidak bisa menentukan username dari input: '{req.username}'. "
-            "Masukkan username (mis. 'prabowo') atau URL profil yang valid.",
+            f"Tidak bisa menentukan username dari input: '{req.username}'.",
             {"profile": {"username": req.username, "success": False}},
         )
 
@@ -414,36 +958,25 @@ def scrape_profile(req: ScrapeProfileRequest):
 
         filename = f"api_profile_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         saved = save_json_output(result, filename)
-
         result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": saved}
 
         if not result.get("success"):
             err = result.get("error", "Scrape gagal tanpa detail")
-            return failure(
-                f"Profile @{username} gagal: {err}",
-                {"profile": result, **result},
-            )
+            return failure(f"Profile @{username} gagal: {err}", {"profile": result, **result})
 
-        return success(
-            {"profile": result, **result},
-            f"Profile @{username} scraped in {elapsed}s",
-        )
+        return success({"profile": result, **result}, f"Profile @{username} scraped in {elapsed}s")
     except Exception as e:
         traceback.print_exc()
-        return failure(
-            f"Profile @{username} error: {str(e)}",
-            {"profile": {"username": username, "success": False, "error": str(e)}},
-        )
+        return failure(f"Profile @{username} error: {str(e)}",
+                       {"profile": {"username": username, "success": False, "error": str(e)}})
 
 
 @app.post("/api/scrape/profile/followers")
 def scrape_followers(req: ScrapeFollowersRequest):
     username = extract_username(req.username)
     if not username:
-        return failure(
-            f"Tidak bisa menentukan username dari input: '{req.username}'",
-            {"username": req.username, "kind": "followers", "success": False, "items": []},
-        )
+        return failure(f"Tidak bisa menentukan username dari input: '{req.username}'",
+                       {"username": req.username, "kind": "followers", "success": False, "items": []})
 
     try:
         t0 = time.time()
@@ -452,36 +985,26 @@ def scrape_followers(req: ScrapeFollowersRequest):
 
         filename = f"api_followers_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         saved = save_json_output(result, filename)
-
         result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": saved}
 
         if not result.get("success"):
             err = result.get("error", "Gagal tanpa detail")
-            return failure(
-                f"Followers @{username} gagal: {err}",
-                {"followers": result, **result},
-            )
+            return failure(f"Followers @{username} gagal: {err}", {"followers": result, **result})
 
-        return success(
-            {"followers": result, **result},
-            f"Followers @{username}: {result.get('count', 0)} items in {elapsed}s",
-        )
+        return success({"followers": result, **result},
+                       f"Followers @{username}: {result.get('count', 0)} items in {elapsed}s")
     except Exception as e:
         traceback.print_exc()
-        return failure(
-            f"Followers @{username} error: {str(e)}",
-            {"followers": {"username": username, "success": False, "items": [], "error": str(e)}},
-        )
+        return failure(f"Followers @{username} error: {str(e)}",
+                       {"followers": {"username": username, "success": False, "items": [], "error": str(e)}})
 
 
 @app.post("/api/scrape/profile/following")
 def scrape_following(req: ScrapeFollowingRequest):
     username = extract_username(req.username)
     if not username:
-        return failure(
-            f"Tidak bisa menentukan username dari input: '{req.username}'",
-            {"username": req.username, "kind": "following", "success": False, "items": []},
-        )
+        return failure(f"Tidak bisa menentukan username dari input: '{req.username}'",
+                       {"username": req.username, "kind": "following", "success": False, "items": []})
 
     try:
         t0 = time.time()
@@ -490,36 +1013,26 @@ def scrape_following(req: ScrapeFollowingRequest):
 
         filename = f"api_following_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         saved = save_json_output(result, filename)
-
         result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": saved}
 
         if not result.get("success"):
             err = result.get("error", "Gagal tanpa detail")
-            return failure(
-                f"Following @{username} gagal: {err}",
-                {"following": result, **result},
-            )
+            return failure(f"Following @{username} gagal: {err}", {"following": result, **result})
 
-        return success(
-            {"following": result, **result},
-            f"Following @{username}: {result.get('count', 0)} items in {elapsed}s",
-        )
+        return success({"following": result, **result},
+                       f"Following @{username}: {result.get('count', 0)} items in {elapsed}s")
     except Exception as e:
         traceback.print_exc()
-        return failure(
-            f"Following @{username} error: {str(e)}",
-            {"following": {"username": username, "success": False, "items": [], "error": str(e)}},
-        )
+        return failure(f"Following @{username} error: {str(e)}",
+                       {"following": {"username": username, "success": False, "items": [], "error": str(e)}})
 
 
 @app.post("/api/scrape/profile/following-verified")
 def scrape_following_verified(req: ScrapeFollowingVerifiedRequest):
     username = extract_username(req.username)
     if not username:
-        return failure(
-            f"Tidak bisa menentukan username dari input: '{req.username}'",
-            {"username": req.username, "kind": "following_verified", "success": False, "items": []},
-        )
+        return failure(f"Tidak bisa menentukan username dari input: '{req.username}'",
+                       {"username": req.username, "kind": "following_verified", "success": False, "items": []})
 
     try:
         t0 = time.time()
@@ -528,31 +1041,54 @@ def scrape_following_verified(req: ScrapeFollowingVerifiedRequest):
 
         filename = f"api_following_verified_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         saved = save_json_output(result, filename)
-
         result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": saved}
 
         if not result.get("success"):
             err = result.get("error", "Gagal tanpa detail")
-            return failure(
-                f"Verified Following @{username} gagal: {err}",
-                {"following_verified": result, **result},
-            )
+            return failure(f"Verified Following @{username} gagal: {err}",
+                           {"following_verified": result, **result})
 
-        return success(
-            {"following_verified": result, **result},
-            f"Verified Following @{username}: {result.get('count', 0)} verified "
-            f"(scanned {result.get('total_scanned', 0)}) in {elapsed}s",
-        )
+        return success({"following_verified": result, **result},
+                       f"Verified Following @{username}: {result.get('count', 0)} verified in {elapsed}s")
     except Exception as e:
         traceback.print_exc()
-        return failure(
-            f"Verified Following @{username} error: {str(e)}",
-            {"following_verified": {"username": username, "success": False, "items": [], "error": str(e)}},
+        return failure(f"Verified Following @{username} error: {str(e)}",
+                       {"following_verified": {"username": username, "success": False, "items": [], "error": str(e)}})
+
+
+@app.post("/api/scrape/profile/posts")
+def scrape_profile_posts(req: ScrapeProfilePostsRequest):
+    username = extract_username(req.username)
+    if not username:
+        return failure(f"Tidak bisa menentukan username dari input: '{req.username}'",
+                       {"username": req.username, "success": False, "posts": []})
+
+    try:
+        t0 = time.time()
+        result = run_profile_posts_scraper(
+            username, req.date_from, req.date_to, req.max_posts,
+            req.include_comments, req.max_comments_per_post, req.max_replies_per_comment,
         )
+        elapsed = round(time.time() - t0, 2)
+
+        filename = f"api_posts_{username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        saved = save_json_output(result, filename)
+        result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": saved}
+
+        if not result.get("success"):
+            err = result.get("error", "Gagal tanpa detail")
+            return failure(f"Posts @{username} gagal: {err}", {"posts_result": result, **result})
+
+        return success({"posts_result": result, **result},
+                       f"Posts @{username}: {result.get('total_posts', 0)} posts in {elapsed}s")
+    except Exception as e:
+        traceback.print_exc()
+        return failure(f"Posts @{username} error: {str(e)}",
+                       {"posts_result": {"username": username, "success": False, "posts": [], "error": str(e)}})
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ENDPOINTS - OUTPUT FILES
+# ENDPOINTS — OUTPUT FILES
 # ════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/output/list")
@@ -564,8 +1100,8 @@ def list_output_files():
                 fp = os.path.join(OUTPUT_DIR, f)
                 st = os.stat(fp)
                 files.append({
-                    "name": f,
-                    "size": st.st_size,
+                    "name":     f,
+                    "size":     st.st_size,
                     "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
                 })
     return success({"files": files, "count": len(files)})
@@ -583,7 +1119,7 @@ def get_output_file(filename: str):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# ENDPOINTS - ANALYTICS
+# ENDPOINTS — ANALYTICS / PROFILES
 # ════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/profiles")
@@ -599,6 +1135,68 @@ def list_profiles():
         return success({"users": [], "count": 0}, f"Error: {str(e)}")
 
 
+@app.get("/api/profiles/{username}/posts")
+def get_profile_posts_files(username: str):
+    username = extract_username(username)
+    if not username:
+        raise HTTPException(400, "Username tidak valid")
+    files = []
+    if os.path.exists(OUTPUT_DIR):
+        prefix = f"api_posts_{username}_"
+        for f in sorted(os.listdir(OUTPUT_DIR), reverse=True):
+            if f.startswith(prefix) and f.endswith(".json"):
+                fp = os.path.join(OUTPUT_DIR, f)
+                st = os.stat(fp)
+                files.append({
+                    "name":     f,
+                    "size":     st.st_size,
+                    "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
+                })
+    return success({"username": username, "files": files, "count": len(files)})
+
+
+@app.get("/api/profiles/{username}/history")
+def profile_history(username: str, limit: int = Query(30)):
+    try:
+        from storage_manager import StorageManager
+        storage = StorageManager()
+        username = extract_username(username)
+        history = storage.get_history(username, limit=limit)
+        return success({"username": username, "history": history, "count": len(history)})
+    except ImportError:
+        raise HTTPException(503, "storage_manager tidak tersedia")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/profiles/{username}/growth")
+def profile_growth(username: str):
+    try:
+        from storage_manager import StorageManager
+        storage = StorageManager()
+        username = extract_username(username)
+        growth = storage.get_growth(username)
+        return success({"username": username, "growth": growth})
+    except ImportError:
+        raise HTTPException(503, "storage_manager tidak tersedia")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/profiles/{username}/monthly")
+def profile_monthly(username: str):
+    try:
+        from storage_manager import StorageManager
+        storage = StorageManager()
+        username = extract_username(username)
+        monthly = storage.get_monthly(username)
+        return success({"username": username, "monthly": monthly})
+    except ImportError:
+        raise HTTPException(503, "storage_manager tidak tersedia")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.get("/api/profiles/{username}")
 def get_profile_detail(username: str):
     try:
@@ -612,6 +1210,10 @@ def get_profile_detail(username: str):
     except Exception as e:
         raise HTTPException(500, str(e))
 
+
+# ════════════════════════════════════════════════════════════════════════════
+# ENTRYPOINT
+# ════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     import uvicorn

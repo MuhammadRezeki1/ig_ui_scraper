@@ -1,7 +1,8 @@
 """
 profile_scraper.py
 ==================
-Scrape data lengkap profile Instagram + Followers + Following + Verified Following.
+Scrape data lengkap profile Instagram + Followers + Following + Verified Following
++ Posts dengan filter tanggal + komentar & replies per post.
 
 CHANGELOG:
 - Bug `bio[1];` di HTML parser fixed
@@ -9,6 +10,8 @@ CHANGELOG:
 - FIX UTAMA: ganti GraphQL query_hash (sudah mati) → v1 API
   /api/v1/friendships/{user_id}/following/ (lebih stabil & reliable)
 - FIX: dedup items by user_id/username sebelum return agar tidak ada duplikat
+- NEW: scrape_profile_posts() — scrape semua post dalam rentang tanggal
+  + komentar (top-level) + replies per komentar
 """
 import os
 import re
@@ -83,6 +86,10 @@ class InstagramProfileScraper:
     def __exit__(self, *_):
         self.close()
 
+    # ════════════════════════════════════════════════════════════════════════
+    # ASSERT HELPERS
+    # ════════════════════════════════════════════════════════════════════════
+
     def _assert_page(self) -> Page:
         if self.page is None:
             raise RuntimeError("Browser page belum diinisialisasi.")
@@ -97,6 +104,10 @@ class InstagramProfileScraper:
         if self.context is None:
             raise RuntimeError("Browser context belum diinisialisasi.")
         return self.context
+
+    # ════════════════════════════════════════════════════════════════════════
+    # BROWSER SETUP
+    # ════════════════════════════════════════════════════════════════════════
 
     def _build_context(self) -> BrowserContext:
         self.playwright = sync_playwright().start()
@@ -211,6 +222,10 @@ class InstagramProfileScraper:
         except Exception:
             pass
 
+    # ════════════════════════════════════════════════════════════════════════
+    # REQUESTS SESSION
+    # ════════════════════════════════════════════════════════════════════════
+
     def _build_requests_session(self) -> requests.Session:
         sess = requests.Session()
         context = self._assert_context()
@@ -247,6 +262,10 @@ class InstagramProfileScraper:
         })
         self.session = sess
         return sess
+
+    # ════════════════════════════════════════════════════════════════════════
+    # USER ID & PROFILE
+    # ════════════════════════════════════════════════════════════════════════
 
     def _get_user_id(self, username: str) -> str:
         page = self._assert_page()
@@ -425,6 +444,10 @@ class InstagramProfileScraper:
             print(Fore.YELLOW + f"   ⚠️  HTML parse error: {e}")
             return {}
 
+    # ════════════════════════════════════════════════════════════════════════
+    # NORMALIZE
+    # ════════════════════════════════════════════════════════════════════════
+
     def _normalize_user(self, user: Dict[str, Any]) -> Dict[str, Any]:
         followers = user.get("edge_followed_by", {}).get("count", 0)
         following = user.get("edge_follow", {}).get("count", 0)
@@ -541,16 +564,11 @@ class InstagramProfileScraper:
         return ""
 
     # ════════════════════════════════════════════════════════════════════════
-    # FOLLOWERS / FOLLOWING — v1 API (REPLACE GraphQL query_hash yang sudah mati)
+    # FOLLOWERS / FOLLOWING — v1 API
     # ════════════════════════════════════════════════════════════════════════
 
     @staticmethod
     def _dedup_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Hapus duplikat dari list items berdasarkan user_id (atau username sebagai
-        fallback). Instagram API kadang mengembalikan user yang sama di halaman
-        yang overlap saat paginasi, sehingga dedup ini penting dilakukan.
-        """
         seen: set = set()
         unique: List[Dict[str, Any]] = []
         for item in items:
@@ -570,12 +588,6 @@ class InstagramProfileScraper:
         only_verified: bool = False,
         verified_target: int = 0,
     ) -> List[Dict[str, Any]]:
-        """
-        Scrape via v1 friendships API (lebih stabil dari GraphQL query_hash).
-        Endpoint:
-          /api/v1/friendships/{user_id}/followers/?count=50&max_id=...
-          /api/v1/friendships/{user_id}/following/?count=50&max_id=...
-        """
         if not user_id:
             print(Fore.YELLOW + f"   ⚠️  user_id kosong, tidak bisa ambil {kind}")
             return []
@@ -591,7 +603,6 @@ class InstagramProfileScraper:
         endpoint = "followers" if kind == "followers" else "following"
 
         while page_num < max_pages:
-            # Stop conditions
             if only_verified and verified_target > 0:
                 if len(all_items) >= verified_target:
                     print(Fore.GREEN + f"   ✅ Target {verified_target} verified tercapai, stop.")
@@ -604,8 +615,6 @@ class InstagramProfileScraper:
                     break
 
             page_num += 1
-
-            # Build URL params
             params = {"user_id": user_id, "endpoint": endpoint, "max_id": max_id or ""}
 
             try:
@@ -710,7 +719,6 @@ class InstagramProfileScraper:
                 else:
                     print(Fore.CYAN + f"   📡 {kind} page {page_num}: +{len(users)} (total {len(all_items)})")
 
-                # Cek next page
                 next_max_id = data.get("next_max_id")
                 if not next_max_id:
                     print(Fore.CYAN + f"   ℹ️  Tidak ada next_max_id, akhir list.")
@@ -727,13 +735,596 @@ class InstagramProfileScraper:
                 time.sleep(5)
 
         self._last_scan_count = total_scanned
-
-        # ── FIX: dedup sebelum return — Instagram API kadang overlap antar page ──
         unique_items = self._dedup_items(all_items)
 
         if only_verified and verified_target > 0:
             return unique_items[:verified_target]
         return unique_items[:max_count]
+
+    # ════════════════════════════════════════════════════════════════════════
+    # REPLIES (dipakai oleh scrape_profile_posts)
+    # ════════════════════════════════════════════════════════════════════════
+
+    def _fetch_replies(self, media_id: str, parent_pk: str, max_replies: int) -> List[Dict[str, Any]]:
+        """Cascade: CDP → REST untuk child_comments."""
+        if not media_id or not parent_pk:
+            return []
+
+        try:
+            replies = self._fetch_replies_via_cdp(media_id, parent_pk, max_replies)
+            if replies:
+                return replies
+        except Exception:
+            pass
+
+        try:
+            return self._fetch_replies_via_rest(media_id, parent_pk, max_replies)
+        except Exception:
+            return []
+
+    def _fetch_replies_via_cdp(self, media_id: str, parent_pk: str, max_replies: int) -> List[Dict[str, Any]]:
+        all_replies: List[Dict[str, Any]] = []
+        next_max_id: Optional[str] = None
+        page_num = 0
+        max_pages = 5
+        page = self._assert_page()
+
+        while len(all_replies) < max_replies and page_num < max_pages:
+            page_num += 1
+            try:
+                result = page.evaluate(r"""(params) => {
+                    const { mediaId, parentPk, maxId } = params;
+                    return (async () => {
+                        try {
+                            let url = `/api/v1/media/${mediaId}/comments/${parentPk}/child_comments/`;
+                            if (maxId) url += `?max_id=${encodeURIComponent(maxId)}`;
+                            const resp = await fetch(url, {
+                                method: 'GET',
+                                credentials: 'include',
+                                headers: {
+                                    'X-IG-App-ID': '936619743392459',
+                                    'X-ASBD-ID': '129477',
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                    'Accept': '*/*',
+                                }
+                            });
+                            const data = await resp.json();
+                            return {ok: true, status: resp.status, data: data};
+                        } catch(e) {
+                            return {ok: false, error: e.toString()};
+                        }
+                    })();
+                }""", {"mediaId": media_id, "parentPk": parent_pk, "maxId": next_max_id})
+
+                if not result.get("ok"):
+                    break
+                if result.get("status") and result["status"] != 200:
+                    break
+
+                data = result.get("data") or {}
+                raw = data.get("child_comments") or data.get("comments") or []
+                if not raw:
+                    break
+
+                for c in raw:
+                    username = c.get("user", {}).get("username", "")
+                    text = c.get("text", "")
+                    if not username or not text:
+                        continue
+                    all_replies.append({
+                        "username":          username,
+                        "text":              text,
+                        "comment_id":        str(c.get("pk", "")),
+                        "like_count":        int(c.get("comment_like_count", 0) or 0),
+                        "created_at":        int(c.get("created_at", 0) or 0),
+                        "parent_comment_id": str(parent_pk),
+                    })
+                    if len(all_replies) >= max_replies:
+                        break
+
+                next_max_id = data.get("next_max_id") or data.get("next_min_id")
+                has_more = data.get("has_more_comments") or data.get("has_more_headload_comments") or False
+                if not next_max_id or not has_more:
+                    break
+
+                time.sleep(random.uniform(0.5, 1.2))
+
+            except Exception as e:
+                print(Fore.YELLOW + f"      ⚠️  Reply CDP error: {e}")
+                break
+
+        return all_replies
+
+    def _fetch_replies_via_rest(self, media_id: str, parent_pk: str, max_replies: int) -> List[Dict[str, Any]]:
+        all_replies: List[Dict[str, Any]] = []
+        next_max_id: Optional[str] = None
+        page_num = 0
+        max_pages = 5
+        sess = self._assert_session()
+
+        while len(all_replies) < max_replies and page_num < max_pages:
+            page_num += 1
+            url = f"https://www.instagram.com/api/v1/media/{media_id}/comments/{parent_pk}/child_comments/"
+            params: Dict[str, str] = {}
+            if next_max_id:
+                params["max_id"] = next_max_id
+
+            try:
+                resp = sess.get(url, params=params, timeout=15)
+                if resp.status_code == 429:
+                    time.sleep(45)
+                    continue
+                if resp.status_code != 200:
+                    break
+                if 'json' not in resp.headers.get('content-type', ''):
+                    break
+
+                data = resp.json()
+                raw = data.get("child_comments") or data.get("comments") or []
+                if not raw:
+                    break
+
+                for c in raw:
+                    username = c.get("user", {}).get("username", "")
+                    text = c.get("text", "")
+                    if not username or not text:
+                        continue
+                    all_replies.append({
+                        "username":          username,
+                        "text":              text,
+                        "comment_id":        str(c.get("pk", "")),
+                        "like_count":        int(c.get("comment_like_count", 0) or 0),
+                        "created_at":        int(c.get("created_at", 0) or 0),
+                        "parent_comment_id": str(parent_pk),
+                    })
+                    if len(all_replies) >= max_replies:
+                        break
+
+                next_max_id = data.get("next_max_id") or data.get("next_min_id")
+                has_more = data.get("has_more_comments") or data.get("has_more_headload_comments") or False
+                if not next_max_id or not has_more:
+                    break
+
+                time.sleep(random.uniform(0.5, 1.2))
+
+            except Exception as e:
+                print(Fore.YELLOW + f"      ⚠️  Reply REST error: {e}")
+                break
+
+        return all_replies
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SCRAPE_PROFILE_POSTS — FEED USER + FILTER TANGGAL
+    # ════════════════════════════════════════════════════════════════════════
+
+    def _fetch_user_feed_page(self, user_id: str, max_id: Optional[str] = None) -> Dict:
+        """Fetch satu halaman feed user via CDP."""
+        page = self._assert_page()
+        try:
+            result = page.evaluate(r"""(params) => {
+                const { userId, maxId } = params;
+                return (async () => {
+                    try {
+                        let url = `https://i.instagram.com/api/v1/feed/user/${userId}/?count=12`;
+                        if (maxId) url += `&max_id=${encodeURIComponent(maxId)}`;
+                        const resp = await fetch(url, {
+                            method: 'GET',
+                            credentials: 'include',
+                            headers: {
+                                'X-IG-App-ID': '936619743392459',
+                                'X-ASBD-ID': '129477',
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'Accept': '*/*',
+                            }
+                        });
+                        const status = resp.status;
+                        const data   = await resp.json().catch(() => null);
+                        return { ok: true, status, data };
+                    } catch(e) {
+                        return { ok: false, error: e.toString() };
+                    }
+                })();
+            }""", {"userId": user_id, "maxId": max_id})
+
+            if not result.get("ok"):
+                print(Fore.YELLOW + f"   ⚠️  Feed CDP error: {result.get('error')}")
+                return {}
+            if result.get("status") != 200:
+                print(Fore.YELLOW + f"   ⚠️  Feed HTTP {result.get('status')}")
+                return {}
+            return result.get("data") or {}
+
+        except Exception as e:
+            print(Fore.YELLOW + f"   ⚠️  _fetch_user_feed_page error: {e}")
+            return {}
+
+    def _fetch_user_feed_page_rest(self, user_id: str, max_id: Optional[str] = None) -> Dict:
+        """Fallback REST untuk _fetch_user_feed_page."""
+        try:
+            sess = self._assert_session()
+            url = f"https://i.instagram.com/api/v1/feed/user/{user_id}/"
+            params: Dict[str, Any] = {"count": 12}
+            if max_id:
+                params["max_id"] = max_id
+            resp = sess.get(url, params=params, timeout=15)
+            if resp.status_code != 200:
+                print(Fore.YELLOW + f"   ⚠️  Feed REST HTTP {resp.status_code}")
+                return {}
+            return resp.json()
+        except Exception as e:
+            print(Fore.YELLOW + f"   ⚠️  _fetch_user_feed_page_rest error: {e}")
+            return {}
+
+    @staticmethod
+    def _normalize_feed_item(item: Dict) -> Dict:
+        """Normalisasi raw item dari /api/v1/feed/user/ menjadi dict terstruktur."""
+        media_type_map = {1: "PHOTO", 2: "VIDEO", 8: "CAROUSEL"}
+        mt = media_type_map.get(item.get("media_type", 0), "PHOTO")
+
+        # Caption
+        cap_node = item.get("caption")
+        caption = ""
+        if isinstance(cap_node, dict):
+            caption = cap_node.get("text", "") or ""
+        elif isinstance(cap_node, str):
+            caption = cap_node
+
+        # Shortcode / code
+        shortcode = item.get("code", "") or item.get("shortcode", "")
+        pk = str(item.get("pk", "") or item.get("id", ""))
+
+        # Likes
+        like_count = item.get("like_count") or 0
+        if isinstance(like_count, dict):
+            like_count = like_count.get("count", 0)
+        like_count = int(like_count or 0)
+
+        # Comments
+        comment_count = int(item.get("comment_count", 0) or 0)
+
+        # Views (video)
+        view_count = int(
+            item.get("view_count") or
+            item.get("ig_play_count") or
+            item.get("video_view_count") or 0
+        )
+        play_count = int(
+            item.get("play_count") or
+            item.get("ig_play_count") or 0
+        )
+
+        # Thumbnail
+        thumbnail = ""
+        img_versions = item.get("image_versions2", {}).get("candidates", [])
+        if img_versions:
+            thumbnail = img_versions[0].get("url", "")
+
+        taken_at = int(item.get("taken_at", 0) or 0)
+
+        return {
+            "media_id":      pk,
+            "shortcode":     shortcode,
+            "url":           f"https://www.instagram.com/p/{shortcode}/" if shortcode else "",
+            "media_type":    mt,
+            "product_type":  item.get("product_type", "") or "",
+            "taken_at":      taken_at,
+            "taken_at_iso":  datetime.utcfromtimestamp(taken_at).isoformat() + "Z" if taken_at else "",
+            "caption":       caption,
+            "like_count":    like_count,
+            "comment_count": comment_count,
+            "view_count":    view_count,
+            "play_count":    play_count,
+            "thumbnail_url": thumbnail,
+            "is_video":      mt == "VIDEO",
+            "location":      (item.get("location") or {}).get("name", ""),
+        }
+
+    def _fetch_post_comments_simple(
+        self,
+        media_id: str,
+        shortcode: str,
+        max_comments: int = 50,
+        max_replies: int = 10,
+    ) -> List[Dict]:
+        """
+        Ambil komentar top-level + replies untuk satu post.
+        Cascade: REST → CDP. Dipakai oleh scrape_profile_posts.
+        """
+        if not media_id and not shortcode:
+            return []
+
+        sess = self._assert_session()
+        comments: List[Dict] = []
+        next_min_id: Optional[str] = None
+        page_num = 0
+
+        while len(comments) < max_comments and page_num < 20:
+            page_num += 1
+            try:
+                url = f"https://www.instagram.com/api/v1/media/{media_id}/comments/"
+                params: Dict[str, Any] = {"can_support_threading": "true"}
+                if next_min_id:
+                    params["min_id"] = next_min_id
+
+                resp = sess.get(url, params=params, timeout=15)
+                if resp.status_code == 429:
+                    print(Fore.YELLOW + "      ⚠️  429 comments — tunggu 45s")
+                    time.sleep(45)
+                    continue
+                if resp.status_code != 200:
+                    break
+                if "json" not in resp.headers.get("content-type", ""):
+                    break
+
+                data = resp.json()
+                raw = data.get("comments", [])
+                if not raw:
+                    break
+
+                for c in raw:
+                    username    = c.get("user", {}).get("username", "")
+                    text        = c.get("text", "")
+                    comment_pk  = str(c.get("pk", ""))
+                    like_count  = int(c.get("comment_like_count", 0) or 0)
+                    created_at  = int(c.get("created_at", 0) or 0)
+                    reply_count = int(c.get("child_comment_count", 0) or 0)
+
+                    if not username or not text:
+                        continue
+
+                    comment_entry: Dict[str, Any] = {
+                        "username":    username,
+                        "text":        text,
+                        "comment_id":  comment_pk,
+                        "like_count":  like_count,
+                        "created_at":  created_at,
+                        "reply_count": reply_count,
+                        "replies":     [],
+                    }
+
+                    # Fetch replies jika ada
+                    if reply_count > 0 and max_replies > 0 and media_id and comment_pk:
+                        raw_replies = self._fetch_replies(media_id, comment_pk, max_replies)
+                        comment_entry["replies"] = [
+                            {
+                                "username":          r.get("username", ""),
+                                "text":              r.get("text", ""),
+                                "comment_id":        r.get("comment_id", ""),
+                                "like_count":        int(r.get("like_count", 0) or 0),
+                                "created_at":        int(r.get("created_at", 0) or 0),
+                                "parent_comment_id": comment_pk,
+                            }
+                            for r in raw_replies
+                            if r.get("username") and r.get("text")
+                        ]
+                        time.sleep(random.uniform(0.3, 0.8))
+
+                    comments.append(comment_entry)
+                    if len(comments) >= max_comments:
+                        break
+
+                next_min_id = data.get("next_min_id")
+                if not next_min_id or not data.get("has_more_comments", False):
+                    break
+
+                time.sleep(random.uniform(1.5, 3.0))
+
+            except Exception as e:
+                print(Fore.YELLOW + f"      ⚠️  fetch comments error: {e}")
+                break
+
+        return comments
+
+    def scrape_profile_posts(
+        self,
+        username: str,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        max_posts: int = 50,
+        include_comments: bool = False,
+        max_comments_per_post: int = 20,
+        max_replies_per_comment: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Scrape semua postingan dari profil @username dalam rentang tanggal.
+
+        Parameters
+        ----------
+        username               : Instagram username (tanpa @)
+        date_from              : '2019-01-01' (inclusive). None = tidak ada batas bawah.
+        date_to                : '2020-12-31' (inclusive). None = hari ini.
+        max_posts              : batas jumlah post yang dikumpulkan (default 50, max 500)
+        include_comments       : apakah scrape komentar tiap post
+        max_comments_per_post  : maks komentar per post (default 20)
+        max_replies_per_comment: maks replies per komentar (default 5)
+        """
+        username = username.strip().lstrip("@").lower()
+
+        print(Fore.CYAN + "\n" + "=" * 70)
+        print(Fore.CYAN + f"📸 Scraping POSTS: @{username}")
+        print(Fore.CYAN + f"   Rentang: {date_from or 'awal'} → {date_to or 'sekarang'}")
+        print(Fore.CYAN + f"   Max posts: {max_posts} | include_comments: {include_comments}")
+        print(Fore.CYAN + "=" * 70)
+
+        result: Dict[str, Any] = {
+            "username":      username,
+            "date_from":     date_from,
+            "date_to":       date_to,
+            "scraped_at":    datetime.now().isoformat(),
+            "scraped_date":  datetime.now().strftime("%Y-%m-%d"),
+            "success":       False,
+            "total_posts":   0,
+            "posts":         [],
+            "error":         "",
+        }
+
+        # Parse filter tanggal → unix timestamp
+        ts_from: int = 0
+        ts_to: int = int(datetime.now().timestamp()) + 86400  # +1 hari buffer
+
+        if date_from:
+            try:
+                ts_from = int(datetime.strptime(date_from, "%Y-%m-%d").timestamp())
+            except ValueError:
+                result["error"] = f"Format date_from salah: '{date_from}'. Gunakan YYYY-MM-DD."
+                return result
+
+        if date_to:
+            try:
+                ts_to = int(datetime.strptime(date_to, "%Y-%m-%d").timestamp()) + 86399
+            except ValueError:
+                result["error"] = f"Format date_to salah: '{date_to}'. Gunakan YYYY-MM-DD."
+                return result
+
+        if ts_from > ts_to:
+            result["error"] = "date_from tidak boleh lebih besar dari date_to."
+            return result
+
+        try:
+            self.initialize_browser()
+            self._build_requests_session()
+
+            print(Fore.CYAN + "\n📡 Mengambil user_id...")
+            page = self._assert_page()
+            page.goto(f"https://www.instagram.com/{username}/")
+            time.sleep(random.uniform(4, 6))
+            self._close_popups()
+
+            if "challenge" in page.url:
+                raise RuntimeError("Challenge terdeteksi — buka akun manual di browser dulu")
+
+            user_id = self._get_user_id(username)
+            if not user_id:
+                result["error"] = "Tidak bisa mendapatkan user_id"
+                return result
+
+            print(Fore.GREEN + f"✅ User ID: {user_id}")
+
+            # ── PAGINATION ────────────────────────────────────────────────
+            all_posts: List[Dict[str, Any]] = []
+            max_id: Optional[str] = None
+            page_num = 0
+            max_pages = 200
+            done = False
+            consecutive_errors = 0
+
+            while not done and page_num < max_pages and len(all_posts) < max_posts:
+                page_num += 1
+
+                # Fetch satu halaman feed
+                data = self._fetch_user_feed_page(user_id, max_id)
+                if not data:
+                    print(Fore.YELLOW + "   ↩️  CDP gagal, coba REST...")
+                    data = self._fetch_user_feed_page_rest(user_id, max_id)
+
+                if not data:
+                    consecutive_errors += 1
+                    if consecutive_errors >= 3:
+                        print(Fore.RED + "   ❌ 3 error berturut, stop pagination.")
+                        break
+                    time.sleep(10)
+                    continue
+
+                if data.get("status") == "fail":
+                    msg = data.get("message", "")
+                    if "rate" in msg.lower() or "limit" in msg.lower():
+                        print(Fore.RED + f"   🛑 Rate limit: {msg} — tunggu 60s")
+                        time.sleep(60)
+                        consecutive_errors += 1
+                        if consecutive_errors >= 3:
+                            break
+                        continue
+                    print(Fore.YELLOW + f"   ⚠️  API fail: {msg}")
+                    break
+
+                consecutive_errors = 0
+                items = data.get("items", [])
+
+                if not items:
+                    print(Fore.CYAN + "   ℹ️  Tidak ada item, akhir feed.")
+                    break
+
+                page_all_older = True
+
+                for item in items:
+                    taken_at = int(item.get("taken_at", 0) or 0)
+
+                    # Skip kalau lebih baru dari date_to
+                    if taken_at > ts_to:
+                        continue
+
+                    # Kalau sudah lebih tua dari date_from, stop
+                    if ts_from > 0 and taken_at < ts_from:
+                        done = True
+                        break
+
+                    page_all_older = False
+                    post = self._normalize_feed_item(item)
+
+                    # Fetch komentar kalau diminta
+                    if include_comments and post["media_id"]:
+                        print(Fore.CYAN + f"   💬 Ambil komentar: {post['shortcode'] or post['media_id']}")
+                        post["comments"] = self._fetch_post_comments_simple(
+                            post["media_id"],
+                            post["shortcode"],
+                            max_comments_per_post,
+                            max_replies_per_comment,
+                        )
+                        post["comments_fetched"] = len(post["comments"])
+                        time.sleep(random.uniform(1.0, 2.5))
+                    else:
+                        post["comments"] = []
+                        post["comments_fetched"] = 0
+
+                    all_posts.append(post)
+
+                    taken_dt = datetime.utcfromtimestamp(taken_at).strftime("%Y-%m-%d") if taken_at else "?"
+                    print(Fore.CYAN +
+                          f"   📷 [{len(all_posts):>4}] {taken_dt} "
+                          f"| {post['media_type']:8} "
+                          f"| ❤ {post['like_count']:>7,} "
+                          f"| 💬 {post['comment_count']:>5,} "
+                          f"| {post['caption'][:45].replace(chr(10), ' ')}...")
+
+                    if len(all_posts) >= max_posts:
+                        done = True
+                        break
+
+                # Kalau semua item lebih tua dari ts_from, stop
+                if page_all_older and ts_from > 0:
+                    print(Fore.CYAN + f"   ℹ️  Semua item di halaman ini lebih tua dari {date_from}, stop.")
+                    break
+
+                # Next page cursor
+                next_max_id = data.get("next_max_id")
+                if not next_max_id or not data.get("more_available", False):
+                    print(Fore.CYAN + "   ℹ️  Tidak ada halaman berikutnya.")
+                    break
+
+                max_id = str(next_max_id)
+                print(Fore.CYAN + f"   📄 Halaman {page_num} selesai — {len(all_posts)} post terkumpul")
+                time.sleep(random.uniform(2.5, 5.0))
+
+            result["posts"] = all_posts
+            result["total_posts"] = len(all_posts)
+            result["success"] = True
+
+            print(Fore.GREEN + f"\n✅ Selesai! {len(all_posts)} post dari @{username}")
+            if all_posts:
+                oldest = datetime.utcfromtimestamp(all_posts[-1]["taken_at"]).strftime("%Y-%m-%d") if all_posts[-1]["taken_at"] else "?"
+                newest = datetime.utcfromtimestamp(all_posts[0]["taken_at"]).strftime("%Y-%m-%d") if all_posts[0]["taken_at"] else "?"
+                print(Fore.GREEN + f"   Rentang aktual: {oldest} → {newest}")
+
+        except Exception as e:
+            print(Fore.RED + f"\n❌ GAGAL: {e}")
+            traceback.print_exc()
+            result["error"] = str(e)
+
+        return result
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SCRAPE FOLLOWERS / FOLLOWING PUBLIC METHODS
+    # ════════════════════════════════════════════════════════════════════════
 
     def scrape_followers(self, username: str, max_count: int = 200) -> Dict[str, Any]:
         username = username.strip().lstrip("@").lower()
@@ -919,18 +1510,22 @@ class InstagramProfileScraper:
 
         return result
 
+    # ════════════════════════════════════════════════════════════════════════
+    # ENGAGEMENT SUMMARY
+    # ════════════════════════════════════════════════════════════════════════
+
     @staticmethod
     def _compute_engagement_summary(recent_posts: List[Dict[str, Any]], followers: int) -> Dict[str, Any]:
         if not recent_posts:
             return {
-                "posts_analyzed":   0,
-                "avg_likes":        0,
-                "avg_comments":     0,
-                "avg_views":        0,
-                "engagement_rate":  0.0,
-                "best_post":        None,
-                "worst_post":       None,
-                "by_media_type":    {},
+                "posts_analyzed":  0,
+                "avg_likes":       0,
+                "avg_comments":    0,
+                "avg_views":       0,
+                "engagement_rate": 0.0,
+                "best_post":       None,
+                "worst_post":      None,
+                "by_media_type":   {},
             }
 
         n = len(recent_posts)
@@ -940,14 +1535,14 @@ class InstagramProfileScraper:
         video_posts = [p for p in recent_posts if p.get("is_video") and p.get("views", 0) > 0]
         total_views = sum(p["views"] for p in video_posts)
 
-        avg_likes = total_likes // n
+        avg_likes    = total_likes    // n
         avg_comments = total_comments // n
-        avg_views = total_views // len(video_posts) if video_posts else 0
+        avg_views    = total_views // len(video_posts) if video_posts else 0
 
         er = (avg_likes + avg_comments) / followers * 100 if followers > 0 else 0.0
 
         scored = sorted(recent_posts, key=lambda p: p["likes"] + p["comments"], reverse=True)
-        best = scored[0]
+        best  = scored[0]
         worst = scored[-1]
 
         by_type: Dict[str, Dict[str, Any]] = {}
@@ -955,16 +1550,16 @@ class InstagramProfileScraper:
             mt = p["media_type"]
             if mt not in by_type:
                 by_type[mt] = {"count": 0, "total_likes": 0, "total_comments": 0, "total_views": 0}
-            by_type[mt]["count"] += 1
-            by_type[mt]["total_likes"] += p["likes"]
+            by_type[mt]["count"]          += 1
+            by_type[mt]["total_likes"]    += p["likes"]
             by_type[mt]["total_comments"] += p["comments"]
-            by_type[mt]["total_views"] += p["views"]
+            by_type[mt]["total_views"]    += p["views"]
 
         for mt, stats in by_type.items():
             cnt = stats["count"]
-            stats["avg_likes"]    = stats["total_likes"] // cnt
+            stats["avg_likes"]    = stats["total_likes"]    // cnt
             stats["avg_comments"] = stats["total_comments"] // cnt
-            stats["avg_views"]    = stats["total_views"] // cnt if stats["total_views"] else 0
+            stats["avg_views"]    = stats["total_views"]    // cnt if stats["total_views"] else 0
 
         return {
             "posts_analyzed":  n,
@@ -982,6 +1577,10 @@ class InstagramProfileScraper:
             },
             "by_media_type": by_type,
         }
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SCRAPE PROFILE
+    # ════════════════════════════════════════════════════════════════════════
 
     def scrape_profile(self, username: str) -> Dict[str, Any]:
         username = username.strip().lstrip("@").lower()
@@ -1073,8 +1672,8 @@ class InstagramProfileScraper:
         print(Fore.CYAN + "\n" + "=" * 60)
         print(Fore.CYAN + "📋 PROFILE SUMMARY")
         print(Fore.CYAN + "=" * 60)
-        print(f"  👤 Username     : @{d.get('username','')}")
-        print(f"  📛 Full name    : {d.get('full_name','')}")
+        print(f"  👤 Username     : @{d.get('username', '')}")
+        print(f"  📛 Full name    : {d.get('full_name', '')}")
         if d.get("is_verified"):
             print(Fore.BLUE + "  ✔️  Verified     : YES")
         if d.get("is_business"):
@@ -1122,7 +1721,8 @@ class InstagramProfileScraper:
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python profile_scraper.py <username> [profile|followers|following|verified]")
+        print("Usage: python profile_scraper.py <username> [profile|followers|following|verified|posts]")
+        print("       python profile_scraper.py username posts 2019-01-01 2020-12-31 50")
         sys.exit(1)
 
     username = sys.argv[1]
@@ -1135,6 +1735,17 @@ if __name__ == "__main__":
             data = scraper.scrape_following(username)
         elif mode == "verified":
             data = scraper.scrape_following_verified(username)
+        elif mode == "posts":
+            date_from  = sys.argv[3] if len(sys.argv) > 3 else None
+            date_to    = sys.argv[4] if len(sys.argv) > 4 else None
+            max_posts  = int(sys.argv[5]) if len(sys.argv) > 5 else 50
+            data = scraper.scrape_profile_posts(
+                username,
+                date_from=date_from,
+                date_to=date_to,
+                max_posts=max_posts,
+                include_comments=False,
+            )
         else:
             data = scraper.scrape_profile(username)
 

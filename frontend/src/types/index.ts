@@ -52,7 +52,7 @@ export interface Comment {
   decision_source: string
   vader_compound: number
 
-  // ── BARU: replies (child_comments) ──
+  // replies (child_comments)
   is_reply?: boolean
   parent_comment_id?: string
   replies?: Comment[]
@@ -142,11 +142,77 @@ export interface PostResult {
   saves_count: number
   comments: Comment[]
   comments_count: number
-  replies_count?: number          // ── BARU
-  include_replies?: boolean       // ── BARU
-  max_replies_per_comment?: number // ── BARU
+  replies_count?: number
+  include_replies?: boolean
+  max_replies_per_comment?: number
   sentiment_summary: SentimentSummary
   _meta?: { saved_file?: string; elapsed_seconds?: number }
+}
+
+// ── Unified Scrape Result ─────────────────────────────────────
+export interface UnifiedResult extends PostResult {
+  /** Data likers (hanya ada kalau scrape_likers=true) */
+  likers: LikerItem[]
+  likers_fetched: number
+  likes_count: number
+  likers_method: string
+  likers_error: string | null
+  /** Aggressive mode flag */
+  aggressive_likers?: boolean
+}
+
+/** Request ke endpoint /api/scrape/unified */
+export interface ScrapeUnifiedRequest {
+  url: string
+  max_comments: number
+  include_replies: boolean
+  max_replies_per_comment: number
+  scrape_likers: boolean
+  max_likers: number
+  aggressive_likers: boolean
+  checkpoint_size: number
+  checkpoint_delay_min: number
+  checkpoint_delay_max: number
+  page_delay_min: number
+  page_delay_max: number
+}
+
+// ── Likers ────────────────────────────────────────────────────
+export interface LikerItem {
+  user_id: string
+  username: string
+  full_name: string
+  is_verified: boolean
+  is_private: boolean
+  profile_pic_url: string
+}
+
+export interface LikersResult {
+  url: string
+  shortcode: string
+  scraped_at: string
+  media_id: string
+  owner_username: string
+  /** Total likes di post (angka dari IG) */
+  likes_count: number
+  /** Berapa liker yang berhasil diambil */
+  likers_fetched: number
+  /** rest | graphql */
+  method: string
+  likers: LikerItem[]
+  error: string | null
+  _meta?: { saved_file?: string; elapsed_seconds?: number }
+}
+
+/** Request ke endpoint /api/scrape/post/likers */
+export interface ScrapeLikersRequest {
+  url: string
+  max_likers?: number           // 0 = semua
+  checkpoint_size?: number      // default 200
+  checkpoint_delay_min?: number // detik
+  checkpoint_delay_max?: number // detik
+  page_delay_min?: number
+  page_delay_max?: number
 }
 
 // ── Profile ───────────────────────────────────────────────────
@@ -230,4 +296,81 @@ export interface FollowingVerifiedResult {
   items: FollowerItem[]
   error: string
   _meta?: { saved_file?: string; elapsed_seconds?: number }
+}
+
+// ── Mutual Follow Analysis ────────────────────────────────────
+export interface MutualFollowItem extends FollowerItem {
+  follows_back: true
+}
+
+export interface MutualFollowAnalysis {
+  target_username: string
+  scraped_at: string
+  followers_count: number
+  following_count: number
+  mutual_count: number
+  mutuals: MutualFollowItem[]
+  not_following_back: FollowerItem[]
+  not_followed_back: FollowerItem[]
+}
+
+// ── Profile Post Item ─────────────────────────────────────────
+export interface PostComment {
+  username: string
+  text: string
+  comment_id: string
+  like_count: number
+  created_at: number
+  reply_count: number
+  replies: Array<{
+    username: string
+    text: string
+    comment_id: string
+    like_count: number
+    created_at: number
+    parent_comment_id: string
+  }>
+}
+
+export interface ProfilePost {
+  media_id: string
+  shortcode: string
+  url: string
+  media_type: 'PHOTO' | 'VIDEO' | 'CAROUSEL'
+  product_type: string
+  taken_at: number
+  taken_at_iso: string
+  caption: string
+  like_count: number
+  comment_count: number
+  view_count: number
+  play_count: number
+  thumbnail_url: string
+  is_video: boolean
+  location: string
+  comments: PostComment[]
+  comments_fetched: number
+}
+
+export interface ProfilePostsResult {
+  username: string
+  date_from: string | null
+  date_to: string | null
+  scraped_at: string
+  scraped_date: string
+  success: boolean
+  total_posts: number
+  posts: ProfilePost[]
+  error: string
+  _meta?: { saved_file?: string; elapsed_seconds?: number }
+}
+
+export interface ScrapeProfilePostsRequest {
+  username: string
+  date_from?: string
+  date_to?: string
+  max_posts?: number
+  include_comments?: boolean
+  max_comments_per_post?: number
+  max_replies_per_comment?: number
 }

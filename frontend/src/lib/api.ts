@@ -3,17 +3,24 @@ import type {
   SessionInfo,
   AuthStatus,
   PostResult,
+  UnifiedResult,
   Profile,
   OutputFile,
   HealthData,
   FollowerListResult,
   FollowingVerifiedResult,
+  MutualFollowAnalysis,
+  MutualFollowItem,
+  FollowerItem,
+  LikersResult,
+  ScrapeLikersRequest,
+  ScrapeUnifiedRequest,
 } from '@/types'
 
 const BASE =
   typeof window === 'undefined'
-    ? process.env.INTERNAL_API_URL || 'http://backend:8000'   // server-side (dalam Docker)
-    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000' // browser (user)
+    ? process.env.INTERNAL_API_URL || 'http://backend:8000'
+    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
   const res = await fetch(`${BASE}${path}`, {
@@ -38,7 +45,7 @@ export const triggerLogout = () => apiFetch('/api/auth/logout', { method: 'POST'
 export const saveCookies   = (cookies_json: string) =>
   apiFetch('/api/auth/cookies', { method: 'POST', body: JSON.stringify({ cookies_json }) })
 
-// ── Scrape ──────────────────────────────────────────────────────
+// ── Scrape Post ─────────────────────────────────────────────────
 export interface ScrapePostOptions {
   include_replies?: boolean
   max_replies_per_comment?: number
@@ -76,6 +83,108 @@ export const scrapePosts = (
     }),
   })
 
+export const scrapeUnified = (req: ScrapeUnifiedRequest) =>
+  apiFetch<PostResult | UnifiedResult>('/api/scrape/post/unified', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
+// ── Scrape Likers ───────────────────────────────────────────────
+export const scrapePostLikers = (req: ScrapeLikersRequest) =>
+  apiFetch<LikersResult>('/api/scrape/post/likers', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
+// ── Download ────────────────────────────────────────────────────
+
+/**
+ * Download JSON hasil scrape post dari server (berdasarkan nama file di output dir).
+ */
+export const downloadPostJson = (filename: string) =>
+  `${BASE}/api/download/post/${encodeURIComponent(filename)}`
+
+/**
+ * Download CSV komentar dari hasil scrape post.
+ * @param replies  true = sertakan balasan (default), false = hanya komentar utama
+ */
+export const downloadPostCommentsCsv = (filename: string, replies = true) =>
+  `${BASE}/api/download/post/${encodeURIComponent(filename)}/comments.csv?replies=${replies}`
+
+/**
+ * Download JSON hasil scrape likers dari server.
+ */
+export const downloadLikersJson = (filename: string) =>
+  `${BASE}/api/download/likers/${encodeURIComponent(filename)}`
+
+/**
+ * Download CSV daftar likers dari hasil scrape.
+ */
+export const downloadLikersCsv = (filename: string) =>
+  `${BASE}/api/download/likers/${encodeURIComponent(filename)}/likers.csv`
+
+export const downloadUnifiedJson = (filename: string) =>
+  `${BASE}/api/download/unified/${encodeURIComponent(filename)}`
+
+export const downloadUnifiedCommentsCsv = (filename: string, replies = true) =>
+  `${BASE}/api/download/unified/${encodeURIComponent(filename)}/comments.csv?replies=${replies}`
+
+export const downloadUnifiedLikersCsv = (filename: string) =>
+  `${BASE}/api/download/unified/${encodeURIComponent(filename)}/likers.csv`
+
+/**
+ * Download CSV komentar langsung dari data yang sudah ada di client
+ * (tidak perlu nama file — POST data langsung ke backend).
+ */
+export async function downloadCommentsInline(
+  comments: PostResult['comments'],
+  filenameHint = 'comments',
+  includeReplies = true,
+): Promise<void> {
+  const res = await fetch(`${BASE}/api/download/comments-csv`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      comments,
+      include_replies: includeReplies,
+      filename_hint: filenameHint,
+    }),
+  })
+  if (!res.ok) throw new Error(`Download gagal: HTTP ${res.status}`)
+  const blob = await res.blob()
+  _triggerDownload(blob, `${filenameHint}_comments.csv`)
+}
+
+/**
+ * Download CSV likers langsung dari data yang sudah ada di client.
+ */
+export async function downloadLikersInline(
+  likers: LikersResult['likers'],
+  filenameHint = 'likers',
+): Promise<void> {
+  const res = await fetch(`${BASE}/api/download/likers-csv`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ likers, filename_hint: filenameHint }),
+  })
+  if (!res.ok) throw new Error(`Download gagal: HTTP ${res.status}`)
+  const blob = await res.blob()
+  _triggerDownload(blob, `${filenameHint}_likers.csv`)
+}
+
+/** Helper: trigger browser download dari Blob */
+function _triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a   = document.createElement('a')
+  a.href     = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ── Profile ─────────────────────────────────────────────────────
 export const scrapeProfile = (username: string, save_snapshot = true) =>
   apiFetch<{ profile: Profile }>('/api/scrape/profile', {
     method: 'POST',
@@ -101,6 +210,60 @@ export const scrapeFollowingVerified = (username: string, max_count = 500) =>
     { method: 'POST', body: JSON.stringify({ username, max_count }) },
   )
 
+// ── Followers + Following sekaligus (untuk analisis mutual) ─────
+/**
+ * Scrape followers DAN following secara paralel, lalu hitung mutual follow.
+ */
+export async function scrapeAndAnalyzeMutuals(
+  username: string,
+  max_count = 500,
+): Promise<MutualFollowAnalysis> {
+  const [followersResp, followingResp] = await Promise.all([
+    scrapeFollowers(username, max_count),
+    scrapeFollowing(username, max_count),
+  ])
+
+  const followers: FollowerItem[] = followersResp.data?.items ?? []
+  const following: FollowerItem[] = followingResp.data?.items ?? []
+
+  return computeMutualFollow(username, followers, following)
+}
+
+/**
+ * Hitung mutual follow dari dua array yang sudah ada.
+ */
+export function computeMutualFollow(
+  target_username: string,
+  followers: FollowerItem[],
+  following: FollowerItem[],
+): MutualFollowAnalysis {
+  const followerSet  = new Set(followers.map(f => f.username.toLowerCase()))
+  const followingSet = new Set(following.map(f => f.username.toLowerCase()))
+
+  const mutuals: MutualFollowItem[] = followers
+    .filter(f => followingSet.has(f.username.toLowerCase()))
+    .map(f => ({ ...f, follows_back: true as const }))
+
+  const not_following_back: FollowerItem[] = followers.filter(
+    f => !followingSet.has(f.username.toLowerCase()),
+  )
+
+  const not_followed_back: FollowerItem[] = following.filter(
+    f => !followerSet.has(f.username.toLowerCase()),
+  )
+
+  return {
+    target_username,
+    scraped_at: new Date().toISOString(),
+    followers_count: followers.length,
+    following_count: following.length,
+    mutual_count: mutuals.length,
+    mutuals,
+    not_following_back,
+    not_followed_back,
+  }
+}
+
 // ── Analytics ───────────────────────────────────────────────────
 export const listProfiles   = () => apiFetch<{ users: Profile[]; count: number }>('/api/profiles')
 export const getProfile     = (username: string) => apiFetch<{ profile: Profile }>(`/api/profiles/${username}`)
@@ -111,4 +274,18 @@ export const profileMonthly = (username: string) => apiFetch(`/api/profiles/${us
 
 // ── Output files ─────────────────────────────────────────────────
 export const listOutputFiles = () => apiFetch<{ files: OutputFile[]; count: number }>('/api/output/list')
-export const getOutputFile   = (filename: string) => fetch(`${BASE}/api/output/${filename}`).then(r => r.json())  
+export const getOutputFile   = (filename: string) => fetch(`${BASE}/api/output/${filename}`).then(r => r.json())
+
+// ── Profile Posts ────────────────────────────────────────────────
+import type { ProfilePostsResult, ScrapeProfilePostsRequest } from '@/types'
+
+export const scrapeProfilePosts = (req: ScrapeProfilePostsRequest) =>
+  apiFetch<ProfilePostsResult>('/api/scrape/profile/posts', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
+export const getProfilePostsFiles = (username: string) =>
+  apiFetch<{ username: string; files: Array<{ name: string; size: number; modified: string }>; count: number }>(
+    `/api/profiles/${username}/posts`
+  )
