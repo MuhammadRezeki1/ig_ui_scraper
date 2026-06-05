@@ -476,8 +476,6 @@ export interface ScrapeProfilePostsRequest {
 
 // ════════════════════════════════════════════════════════════════
 // CHECKPOINT SESSION TYPES
-// → TEMPEL di akhir file frontend/src/types.ts (atau types/index.ts)
-//   Memakai `Comment` & `SentimentSummary` yang sudah ada di types.ts.
 // ════════════════════════════════════════════════════════════════
 
 /** Cursor posisi scraping (titik lanjut tanpa duplikat). */
@@ -572,4 +570,156 @@ export interface StartCheckpointRequest {
   batch_size: number
   include_replies: boolean
   max_replies_per_comment: number
+}
+
+// ════════════════════════════════════════════════════════════════
+// SEARCH (keyword / hashtag) TYPES
+// ════════════════════════════════════════════════════════════════
+
+export interface SearchPostItem {
+  media_id: string
+  shortcode: string
+  url: string
+  owner_username: string
+  owner_full_name: string
+  owner_is_verified: boolean
+  caption: string
+  like_count: number
+  comment_count: number
+  view_count: number
+  play_count: number
+  taken_at: number
+  taken_at_iso: string
+  media_type: 'PHOTO' | 'VIDEO' | 'CAROUSEL' | 'UNKNOWN'
+  product_type: string
+  thumbnail_url: string
+  is_video: boolean
+  source: 'top' | 'recent'
+  rank: number
+  /** Hanya ada di hasil keyword (agregasi multi-hashtag) */
+  hashtag?: string
+}
+
+export interface HashtagSuggestion {
+  name: string
+  media_count: number
+  formatted_media_count: string
+  id: string
+  search_result_subtitle: string
+}
+
+export interface UserSuggestion {
+  username: string
+  full_name: string
+  profile_pic_url: string
+  is_verified: boolean
+  is_private: boolean
+  follower_count: number
+}
+
+export interface PlaceSuggestion {
+  name: string
+  address: string
+  city: string
+}
+
+export interface DiscoverResult {
+  query: string
+  scraped_at: string
+  success: boolean
+  hashtags: HashtagSuggestion[]
+  users: UserSuggestion[]
+  places: PlaceSuggestion[]
+  error: string | null
+  _meta?: { elapsed_seconds?: number }
+}
+
+export interface HashtagSearchResult {
+  query: string
+  hashtag: string
+  media_count: number
+  formatted_media_count: string
+  scraped_at: string
+  scraped_date: string
+  success: boolean
+  top_count: number
+  recent_count: number
+  total_fetched: number
+  posts: SearchPostItem[]
+  related_hashtags: HashtagSuggestion[]
+  error: string | null
+  _meta?: { saved_file?: string; elapsed_seconds?: number }
+}
+
+export interface KeywordSearchResult {
+  query: string
+  scraped_at: string
+  scraped_date: string
+  success: boolean
+  searched_hashtags: string[]
+  suggested_hashtags: HashtagSuggestion[]
+  suggested_users: UserSuggestion[]
+  total_fetched: number
+  posts: SearchPostItem[]
+  error: string | null
+  _meta?: { saved_file?: string; elapsed_seconds?: number }
+}
+
+export interface DiscoverRequest {
+  query: string
+}
+
+export interface SearchHashtagRequest {
+  hashtag: string
+  max_posts?: number
+  include_top?: boolean
+  include_recent?: boolean
+  recent_pages?: number
+}
+
+export interface SearchKeywordRequest {
+  keyword: string
+  max_posts?: number
+  max_hashtags?: number
+  per_hashtag_pages?: number
+  include_recent?: boolean
+}
+
+// ════════════════════════════════════════════════════════════════
+// DEEP SEARCH TYPES
+// ════════════════════════════════════════════════════════════════
+
+export type DeepJobStatus = 'pending' | 'running' | 'completed' | 'cancelled' | 'error'
+
+export interface DeepSearchJob {
+  job_id: string
+  mode: 'hashtag' | 'keyword'
+  query: string
+  status: DeepJobStatus
+  config: Record<string, unknown>
+  created_at: string
+  updated_at: string
+  total_fetched: number
+  error: string | null
+}
+
+export interface DeepSearchJobSummary {
+  job_id: string
+  mode: 'hashtag' | 'keyword'
+  query: string
+  status: DeepJobStatus
+  total_fetched: number
+  created_at: string
+  updated_at: string
+}
+
+export interface DeepHashtagRequest {
+  hashtag: string
+  max_related_hashtags?: number
+  include_top?: boolean
+}
+
+export interface DeepKeywordRequest {
+  keyword: string
+  max_hashtags?: number
 }

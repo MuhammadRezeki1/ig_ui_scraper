@@ -11,8 +11,13 @@ backend/session/
 # Output scraping
 backend/engine/output/
 
-# Playwright Chrome Profile
+# Deep jobs
+backend/engine/deep_jobs/
+
+# Chrome Profiles
+backend/engine/chrome_profile/
 backend/engine/chrome_profile_playwright/
+backend/engine/chrome_profile_search/
 
 # Node
 frontend/node_modules/
@@ -29,5 +34,5 @@ frontend/.env.local
 # Logs
 *.log
 
-# Chrome profile (Selenium - bukan Playwright)
-backend/engine/chrome_profile/
+# Cache
+.cache/

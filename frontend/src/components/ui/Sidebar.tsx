@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Search, Users, BarChart2, FileJson,
-  Settings, Wifi, WifiOff, ChevronRight,
+  Settings, Wifi, WifiOff, ChevronRight, Hash,
 } from 'lucide-react'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
 import { clsx } from 'clsx'
@@ -14,6 +14,7 @@ import { getHealth, getSession } from '@/lib/api'
 const NAV = [
   { href: '/main/dashboard',  label: 'Dashboard',    icon: LayoutDashboard },
   { href: '/main/scrapes',    label: 'Scrape Post',  icon: Search },
+  { href: '/main/search',     label: 'Search',       icon: Hash },           // ← BARU
   { href: '/main/profiles',   label: 'Profiles',     icon: Users },
   { href: '/main/analytics',  label: 'Analytics',    icon: BarChart2 },
   { href: '/main/files',      label: 'Output Files', icon: FileJson },
@@ -22,13 +23,12 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const [engineOk, setEngineOk] = useState(false)
+  const [engineOk, setEngineOk]       = useState(false)
   const [sessionUser, setSessionUser] = useState<string | null>(null)
 
   const check = useCallback(async () => {
     try {
       const res = await getHealth()
-      // res.data.api === 'running' artinya engine OK
       setEngineOk(res.success === true && res.data?.api === 'running')
     } catch {
       setEngineOk(false)
@@ -52,42 +52,52 @@ export function Sidebar() {
       <div className="absolute inset-0 glass border-r border-white/[0.07]" />
 
       <div className="relative flex flex-col h-full px-4 py-6">
-        {/* Logo */}
+
+        {/* ── Logo ── */}
         <Link href="/main/dashboard" className="flex items-center gap-3 mb-8 px-2">
           <IGLogoFilled size={40} />
           <div>
-            <p className="font-display font-800 text-lg leading-none" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+            <p
+              className="font-display font-800 text-lg leading-none"
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}
+            >
               <span className="ig-text">IG Scraper</span>
             </p>
             <p className="text-[11px] text-white/40 mt-0.5">Analytics Dashboard</p>
           </div>
         </Link>
 
-        {/* Engine badge */}
+        {/* ── Engine badge ── */}
         <div className="glass rounded-xl px-3 py-2.5 mb-6 flex items-center gap-2.5">
-          <div className={clsx(
-            'w-2 h-2 rounded-full flex-shrink-0',
-            engineOk
-              ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
-              : 'bg-red-400'
-          )} />
+          <div
+            className={clsx(
+              'w-2 h-2 rounded-full flex-shrink-0',
+              engineOk
+                ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
+                : 'bg-red-400',
+            )}
+          />
           <div className="min-w-0">
             <p className="text-[11px] text-white/40 leading-none mb-0.5">Engine</p>
             <p className="text-xs font-medium truncate">
-              {engineOk
-                ? (sessionUser ? sessionUser : 'Connected')
-                : 'Disconnected'}
+              {engineOk ? (sessionUser ?? 'Connected') : 'Disconnected'}
             </p>
           </div>
           {engineOk
             ? <Wifi size={14} className="text-emerald-400 ml-auto flex-shrink-0" />
-            : <WifiOff size={14} className="text-red-400 ml-auto flex-shrink-0" />}
+            : <WifiOff size={14} className="text-red-400 ml-auto flex-shrink-0" />
+          }
         </div>
 
-        {/* Nav */}
+        {/* ── Nav ── */}
         <nav className="flex-1 space-y-1">
           {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || (href !== '/main/dashboard' && pathname.startsWith(href))
+            const active =
+              pathname === href ||
+              (href !== '/main/dashboard' && pathname.startsWith(href))
+
+            const isSearch = href === '/main/search'
+
             return (
               <Link
                 key={href}
@@ -96,32 +106,60 @@ export function Sidebar() {
                   'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative',
                   active
                     ? 'bg-white/[0.08] border border-white/[0.12]'
-                    : 'hover:bg-white/[0.04] border border-transparent'
+                    : 'hover:bg-white/[0.04] border border-transparent',
                 )}
               >
+                {/* Left accent bar */}
                 {active && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
-                    style={{ background: 'var(--ig-grad)' }} />
+                  <div
+                    className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full"
+                    style={{ background: 'var(--ig-grad)' }}
+                  />
                 )}
+
                 <Icon
                   size={18}
                   className={clsx(
                     'flex-shrink-0 transition-colors',
-                    active ? 'text-white' : 'text-white/40 group-hover:text-white/70'
+                    active
+                      ? 'text-white'
+                      : isSearch
+                        ? 'text-pink-400/70 group-hover:text-pink-300'
+                        : 'text-white/40 group-hover:text-white/70',
                   )}
                 />
-                <span className={clsx(
-                  'text-sm font-medium flex-1',
-                  active ? 'text-white' : 'text-white/50 group-hover:text-white/80'
-                )}>
+
+                <span
+                  className={clsx(
+                    'text-sm font-medium flex-1',
+                    active
+                      ? 'text-white'
+                      : isSearch
+                        ? 'text-pink-300/80 group-hover:text-pink-200'
+                        : 'text-white/50 group-hover:text-white/80',
+                  )}
+                >
                   {label}
                 </span>
+
+                {/* Badge "NEW" untuk Search (hanya kalau tidak active) */}
+                {isSearch && !active && (
+                  <span
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded-full
+                               bg-pink-500/20 border border-pink-500/30 text-pink-300
+                               tracking-wide"
+                  >
+                    NEW
+                  </span>
+                )}
+
                 {active && <ChevronRight size={14} className="text-white/30" />}
               </Link>
             )
           })}
         </nav>
 
+        {/* ── Footer ── */}
         <div className="pt-4 border-t border-white/[0.06]">
           <div className="text-[10px] text-white/20 text-center">
             IG Scraper v16.1 · FastAPI Bridge

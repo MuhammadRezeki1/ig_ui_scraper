@@ -404,3 +404,108 @@ export const downloadCheckpointJson = (session_id: string) =>
  */
 export const downloadCheckpointCommentsCsv = (session_id: string, replies = true) =>
   `${BASE}/api/scrape/session/${encodeURIComponent(session_id)}/comments.csv?replies=${replies}`
+
+// ════════════════════════════════════════════════════════════════
+// SEARCH API (keyword / hashtag)
+// ════════════════════════════════════════════════════════════════
+
+import type {
+  DiscoverResult,
+  HashtagSearchResult,
+  KeywordSearchResult,
+  DiscoverRequest,
+  SearchHashtagRequest,
+  SearchKeywordRequest,
+  SearchPostItem,
+} from '@/types'
+
+/** Cari saran hashtag + akun dari sebuah query (cepat). */
+export const discoverSearch = (query: string) =>
+  apiFetch<DiscoverResult>('/api/search/discover', {
+    method: 'POST',
+    body: JSON.stringify({ query } satisfies DiscoverRequest),
+  })
+
+/** Ambil postingan dari satu hashtag (Top + Recent). */
+export const searchHashtag = (req: SearchHashtagRequest) =>
+  apiFetch<HashtagSearchResult>('/api/search/hashtag', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
+/** Cari postingan dari keyword (topsearch → hashtag relevan → agregasi). */
+export const searchKeyword = (req: SearchKeywordRequest) =>
+  apiFetch<KeywordSearchResult>('/api/search/keyword', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
+/** Download CSV daftar postingan hasil search (data langsung dari client). */
+export async function downloadSearchPostsInline(
+  posts: SearchPostItem[],
+  filenameHint = 'search',
+): Promise<void> {
+  const res = await fetch(`${BASE}/api/download/search-csv`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ posts, filename_hint: filenameHint }),
+  })
+  if (!res.ok) throw new Error(`Download gagal: HTTP ${res.status}`)
+  const blob = await res.blob()
+  _triggerDownload(blob, `${filenameHint}_posts.csv`)
+}
+
+// ════════════════════════════════════════════════════════════════
+// DEEP SEARCH API
+// ════════════════════════════════════════════════════════════════
+
+import type {
+  DeepSearchJob,
+  DeepSearchJobSummary,
+  DeepHashtagRequest,
+  DeepKeywordRequest,
+} from '@/types'
+
+/** Mulai deep search hashtag (expand ke related hashtags). */
+export const deepSearchHashtag = (req: DeepHashtagRequest) =>
+  apiFetch<{ job_id: string; mode: string; query: string }>(
+    '/api/search/deep/hashtag',
+    { method: 'POST', body: JSON.stringify(req) },
+  )
+
+/** Mulai deep search keyword (topsearch → tiap hashtag). */
+export const deepSearchKeyword = (req: DeepKeywordRequest) =>
+  apiFetch<{ job_id: string; mode: string; query: string }>(
+    '/api/search/deep/keyword',
+    { method: 'POST', body: JSON.stringify(req) },
+  )
+
+/** Daftar semua deep search jobs. */
+export const listDeepJobs = () =>
+  apiFetch<{ jobs: DeepSearchJobSummary[]; count: number }>(
+    '/api/search/deep/jobs',
+  )
+
+/** Status + progres satu job (polling). Posts kosong kalau masih running. */
+export const getDeepJob = (job_id: string) =>
+  apiFetch<DeepSearchJob>(`/api/search/deep/jobs/${encodeURIComponent(job_id)}`)
+
+/** Ambil posts dari job yang sudah completed. */
+export const getDeepJobPosts = (job_id: string) =>
+  apiFetch<{ posts: SearchPostItem[]; total: number }>(
+    `/api/search/deep/jobs/${encodeURIComponent(job_id)}/posts`,
+  )
+
+/** Cancel job yang sedang berjalan. */
+export const cancelDeepJob = (job_id: string) =>
+  apiFetch<{ job_id: string; cancelled: boolean }>(
+    `/api/search/deep/jobs/${encodeURIComponent(job_id)}/cancel`,
+    { method: 'POST', body: '{}' },
+  )
+
+/** Hapus job (cancel + hapus file state). */
+export const deleteDeepJob = (job_id: string) =>
+  apiFetch<{ job_id: string; deleted: boolean }>(
+    `/api/search/deep/jobs/${encodeURIComponent(job_id)}`,
+    { method: 'DELETE' },
+  )

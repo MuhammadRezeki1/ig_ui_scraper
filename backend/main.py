@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 from checkpoint_session_api import router as checkpoint_router
+from search_deep_endpoints import deep_search_router
 
 # ── PATH SETUP ──────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +42,7 @@ app.add_middleware(
 )
 
 app.include_router(checkpoint_router)
+app.include_router(deep_search_router)
 
 # Batas aman default — bisa di-override via env
 SAFE_MAX_COMMENTS = int(os.getenv("SAFE_MAX_COMMENTS", 2000))
@@ -1303,6 +1305,201 @@ def get_profile_detail(username: str):
         raise HTTPException(503, "storage_manager tidak tersedia")
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SEARCH (keyword / hashtag) — TEMPEL sebelum bagian ENTRYPOINT
+# Memakai: ENGINE_DIR, _run_subprocess, success, failure, save_json_output,
+#          sanitize_filename, _rows_to_csv_bytes, StreamingResponse, io, dll.
+# ════════════════════════════════════════════════════════════════════════════
+
+class DiscoverRequest(BaseModel):
+    query: str
+
+class SearchHashtagRequest(BaseModel):
+    hashtag: str
+    max_posts: int = 60
+    include_top: bool = True
+    include_recent: bool = True
+    recent_pages: int = 5
+
+class SearchKeywordRequest(BaseModel):
+    keyword: str
+    max_posts: int = 60
+    max_hashtags: int = 3
+    per_hashtag_pages: int = 1
+    include_recent: bool = True
+
+class DownloadSearchInlineRequest(BaseModel):
+    posts: List[Any] = []
+    filename_hint: str = "search"
+
+
+def run_discover(query: str) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from search_scraper import InstagramSearchScraper
+import json
+
+with InstagramSearchScraper() as scraper:
+    result = scraper.discover({json.dumps(query)})
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    return _run_subprocess(script, timeout=150)
+
+
+def run_search_hashtag(hashtag: str, max_posts: int, include_top: bool,
+                       include_recent: bool, recent_pages: int) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from search_scraper import InstagramSearchScraper
+import json
+
+with InstagramSearchScraper() as scraper:
+    result = scraper.search_hashtag(
+        {json.dumps(hashtag)},
+        max_posts={max_posts},
+        include_top={include_top},
+        include_recent={include_recent},
+        recent_pages={recent_pages},
+    )
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    timeout = max(180, 120 + recent_pages * 90)
+    return _run_subprocess(script, timeout=timeout)
+
+
+def run_search_keyword(keyword: str, max_posts: int, max_hashtags: int,
+                       per_hashtag_pages: int, include_recent: bool) -> dict:
+    script = f"""
+import sys
+sys.path.insert(0, r'{ENGINE_DIR}')
+from search_scraper import InstagramSearchScraper
+import json
+
+with InstagramSearchScraper() as scraper:
+    result = scraper.search_keyword(
+        {json.dumps(keyword)},
+        max_posts={max_posts},
+        max_hashtags={max_hashtags},
+        per_hashtag_pages={per_hashtag_pages},
+        include_recent={include_recent},
+    )
+    print("___RESULT_START___")
+    print(json.dumps(result, ensure_ascii=False, default=str))
+"""
+    timeout = max(300, 120 + max_hashtags * (per_hashtag_pages * 90 + 60))
+    return _run_subprocess(script, timeout=timeout)
+
+
+SEARCH_POST_CSV_FIELDS = [
+    "rank", "source", "hashtag", "shortcode", "url", "owner_username",
+    "owner_full_name", "owner_is_verified", "media_type", "product_type",
+    "like_count", "comment_count", "view_count", "play_count",
+    "taken_at", "taken_at_iso", "caption",
+]
+
+
+def _search_posts_to_csv_rows(posts: list) -> list:
+    rows = []
+    for p in posts:
+        rows.append({
+            "rank":              p.get("rank", ""),
+            "source":            p.get("source", ""),
+            "hashtag":           p.get("hashtag", ""),
+            "shortcode":         p.get("shortcode", ""),
+            "url":               p.get("url", ""),
+            "owner_username":    p.get("owner_username", ""),
+            "owner_full_name":   p.get("owner_full_name", ""),
+            "owner_is_verified": p.get("owner_is_verified", False),
+            "media_type":        p.get("media_type", ""),
+            "product_type":      p.get("product_type", ""),
+            "like_count":        p.get("like_count", 0),
+            "comment_count":     p.get("comment_count", 0),
+            "view_count":        p.get("view_count", 0),
+            "play_count":        p.get("play_count", 0),
+            "taken_at":          p.get("taken_at", 0),
+            "taken_at_iso":      p.get("taken_at_iso", ""),
+            "caption":           p.get("caption", ""),
+        })
+    return rows
+
+
+@app.post("/api/search/discover")
+def search_discover(req: DiscoverRequest):
+    q = (req.query or "").strip()
+    if not q:
+        return failure("Query kosong", {"query": q, "hashtags": [], "users": [], "places": []})
+    try:
+        t0 = time.time()
+        result = run_discover(q)
+        result.setdefault("_meta", {})["elapsed_seconds"] = round(time.time() - t0, 2)
+        if not result.get("success"):
+            return failure(result.get("error") or "Pencarian gagal", result)
+        return success(result, f"{len(result.get('hashtags', []))} hashtag · {len(result.get('users', []))} akun")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"Discover failed: {str(e)}")
+
+
+@app.post("/api/search/hashtag")
+def search_hashtag_endpoint(req: SearchHashtagRequest):
+    max_posts    = max(1, min(req.max_posts, 300))
+    recent_pages = max(1, min(req.recent_pages, 12))
+    try:
+        t0 = time.time()
+        result = run_search_hashtag(req.hashtag, max_posts, req.include_top, req.include_recent, recent_pages)
+        elapsed = round(time.time() - t0, 2)
+        if result.get("success"):
+            filename = f"api_search_tag_{sanitize_filename(result.get('hashtag', 'tag'))}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            save_json_output(result, filename)
+            result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": filename}
+            return success(result,
+                           f"#{result.get('hashtag')}: {result.get('total_fetched', 0)} post "
+                           f"(top {result.get('top_count', 0)} · recent {result.get('recent_count', 0)})")
+        result.setdefault("_meta", {})["elapsed_seconds"] = elapsed
+        return failure(result.get("error") or "Pencarian hashtag gagal", result)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"Hashtag search failed: {str(e)}")
+
+
+@app.post("/api/search/keyword")
+def search_keyword_endpoint(req: SearchKeywordRequest):
+    max_posts         = max(1, min(req.max_posts, 300))
+    max_hashtags      = max(1, min(req.max_hashtags, 6))
+    per_hashtag_pages = max(1, min(req.per_hashtag_pages, 5))
+    try:
+        t0 = time.time()
+        result = run_search_keyword(req.keyword, max_posts, max_hashtags, per_hashtag_pages, req.include_recent)
+        elapsed = round(time.time() - t0, 2)
+        if result.get("success"):
+            filename = f"api_search_kw_{sanitize_filename(req.keyword)[:40]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            save_json_output(result, filename)
+            result["_meta"] = {"elapsed_seconds": elapsed, "saved_file": filename}
+            tags = ", ".join("#" + t for t in result.get("searched_hashtags", []))
+            return success(result, f"'{req.keyword}': {result.get('total_fetched', 0)} post dari {tags or '—'}")
+        result.setdefault("_meta", {})["elapsed_seconds"] = elapsed
+        return failure(result.get("error") or "Pencarian keyword gagal", result)
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"Keyword search failed: {str(e)}")
+
+
+@app.post("/api/download/search-csv")
+def download_search_csv_inline(req: DownloadSearchInlineRequest):
+    rows = _search_posts_to_csv_rows(req.posts)
+    csv_bytes = _rows_to_csv_bytes(rows, SEARCH_POST_CSV_FIELDS)
+    fname = sanitize_filename(f"{req.filename_hint}_posts.csv")
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════

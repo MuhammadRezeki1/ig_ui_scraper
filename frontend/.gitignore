@@ -39,3 +39,21 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.cache/
+
+
+# Chrome Profile
+backend/engine/chrome_profile_search/
+
+# Session & Data
+backend/session/
+backend/data/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Logs
+*.log
