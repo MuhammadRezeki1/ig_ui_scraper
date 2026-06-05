@@ -7,14 +7,29 @@ services:
     container_name: ig-scraper-backend
     ports:
       - "8000:8000"
-    env_file:
-      - ./backend/.env
+    environment:
+      - FLASK_API_BASE=${FLASK_API_BASE}
+      - ENGINE_PATH=${ENGINE_PATH}
+      - API_PORT=${API_PORT}
+      - API_HOST=${API_HOST}
+      - GEMINI_ENABLED=${GEMINI_ENABLED}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_CONFIDENCE_THRESHOLD=${GEMINI_CONFIDENCE_THRESHOLD}
+      - HEADLESS=${HEADLESS}
+      - PROFILE_DIR=${PROFILE_DIR}
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - ALL_PROXY=${ALL_PROXY}
+      - NO_PROXY=${NO_PROXY}
     volumes:
-      - ./backend/data:/app/data
-      - ./backend/session:/app/session
+      - backend_data:/app/data
+      - backend_session:/app/session
     restart: unless-stopped
     networks:
-      - ig-scraper-net
+      - dokploy-network
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
 
   frontend:
     build:
@@ -26,16 +41,25 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      # Untuk browser user (akses dari luar Docker)
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-      # Untuk server-side Next.js (akses antar container)
-      - INTERNAL_API_URL=http://backend:8000
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - INTERNAL_API_URL=${INTERNAL_API_URL}
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - ALL_PROXY=${ALL_PROXY}
+      - NO_PROXY=${NO_PROXY}
     depends_on:
       - backend
     restart: unless-stopped
     networks:
-      - ig-scraper-net
+      - dokploy-network
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
 
 networks:
-  ig-scraper-net:
-    driver: bridge
+  dokploy-network:
+    external: true
+
+volumes:
+  backend_data:
+  backend_session:
