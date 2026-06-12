@@ -1,12 +1,12 @@
 'use client'
 
 import { useState, useEffect, useSyncExternalStore, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Search, Link2, Loader2, AlertCircle, ChevronDown, ChevronUp,
   Plus, Trash2, CheckCircle, XCircle, Clock, MessageCircle,
   Hash, MessagesSquare, Heart, Download, Zap, Shield, Users,
-  BarChart2, Layers, Infinity, AlertTriangle, Info,
+  BarChart2, Layers, Infinity, AlertTriangle, Info, Play, Image as ImageIcon,
 } from 'lucide-react'
 import {
   scrapePost,
@@ -671,25 +671,45 @@ function PostResultView({ result, mode }: { result: PostResult | UnifiedResult; 
   return (
     <div className="space-y-6">
       <div className="glass-card p-6">
-        <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-semibold text-lg" style={{ fontFamily: 'var(--font-display)' }}>
-                @{result.owner_username || 'unknown'}
-              </h2>
-              {isUnlimited && <UnlimitedBadge />}
-            </div>
-            <p className="text-xs text-white/40 mt-0.5">
-              {result.media_type} · {result.product_type || 'feed'} · {result.method}
-              {unified && ` · likers: ${unified.likers_method || '—'}`}
-            </p>
+        <div className="flex items-start gap-4 mb-4">
+          {/* Thumbnail */}
+          <div className="w-20 h-20 rounded-xl overflow-hidden bg-white/5 shrink-0 relative">
+            {result.thumbnail_url ? (
+              <img src={result.thumbnail_url} alt="" className="w-full h-full object-cover" loading="lazy"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <ImageIcon size={20} className="text-white/20" />
+              </div>
+            )}
+            {result.media_type === 'VIDEO' && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                <Play size={18} className="text-white/80" fill="white" />
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <LikersButton postUrl={result.url} likes={result.likes} />
-            <a href={result.url} target="_blank" rel="noopener noreferrer"
-              className="btn-glass text-xs flex items-center gap-1.5">
-              <Link2 size={12} /> Buka Post
-            </a>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between flex-wrap gap-3">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="font-semibold text-lg" style={{ fontFamily: 'var(--font-display)' }}>
+                    @{result.owner_username || 'unknown'}
+                  </h2>
+                  {isUnlimited && <UnlimitedBadge />}
+                </div>
+                <p className="text-xs text-white/40 mt-0.5">
+                  {result.media_type} · {result.product_type || 'feed'} · {result.method}
+                  {unified && ` · likers: ${unified.likers_method || '—'}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <LikersButton postUrl={result.url} likes={result.likes} />
+                <a href={result.url} target="_blank" rel="noopener noreferrer"
+                  className="btn-glass text-xs flex items-center gap-1.5">
+                  <Link2 size={12} /> Buka Post
+                </a>
+              </div>
+            </div>
           </div>
         </div>
         {result.caption && (
@@ -826,20 +846,40 @@ function BatchResultItem({ item, idx, openIdx, setOpenIdx }: {
   const isUnlimited = d.is_unlimited_comments ?? false
   return (
     <div className="glass-card p-5 space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold">@{d.owner_username || 'unknown'}</h3>
-            {isUnlimited && <UnlimitedBadge />}
-          </div>
-          <p className="text-xs text-white/40 mt-0.5">{d.media_type} · {d.product_type || 'feed'} · {d.method || '—'}</p>
+      <div className="flex items-start gap-3">
+        {/* Thumbnail */}
+        <div className="w-16 h-16 rounded-lg overflow-hidden bg-white/5 shrink-0 relative">
+          {d.thumbnail_url ? (
+            <img src={d.thumbnail_url} alt="" className="w-full h-full object-cover" loading="lazy"
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <ImageIcon size={16} className="text-white/20" />
+            </div>
+          )}
+          {d.media_type === 'VIDEO' && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+              <Play size={14} className="text-white/80" fill="white" />
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          <LikersButton postUrl={d.url} likes={d.likes} size="small" />
-          <a href={d.url} target="_blank" rel="noopener noreferrer"
-            className="btn-glass text-xs flex items-center gap-1.5">
-            <Link2 size={12} /> Buka
-          </a>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold">@{d.owner_username || 'unknown'}</h3>
+                {isUnlimited && <UnlimitedBadge />}
+              </div>
+              <p className="text-xs text-white/40 mt-0.5">{d.media_type} · {d.product_type || 'feed'} · {d.method || '—'}</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              <LikersButton postUrl={d.url} likes={d.likes} size="small" />
+              <a href={d.url} target="_blank" rel="noopener noreferrer"
+                className="btn-glass text-xs flex items-center gap-1.5">
+                <Link2 size={12} /> Buka
+              </a>
+            </div>
+          </div>
         </div>
       </div>
       {d.caption && (
@@ -963,6 +1003,7 @@ const CLIENT_SAFE_MAX = 2000
 
 export default function ScrapePage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // ── Mode ──────────────────────────────────────────────────────────
   // 'checkpoint' ditambahkan ke sini hanya sebagai UI state — bukan
@@ -981,6 +1022,12 @@ export default function ScrapePage() {
   const [maxComments, setMaxComments]       = useState(100)
   const [includeReplies, setIncludeReplies] = useState(true)
   const [maxReplies, setMaxReplies]         = useState(20)
+
+  // ── Read ?url= param on mount ─────────────────────────────────────
+  useEffect(() => {
+    const u = searchParams.get('url')
+    if (u) setUrl(u)
+  }, [searchParams])
 
   // ── Likers config ─────────────────────────────────────────────────
   const [likersConfig, setLikersConfig] = useState<LikersConfig>(DEFAULT_LIKERS_CONFIG)

@@ -33,7 +33,7 @@ import { JOB_PARSERS } from '@/lib/jobParsers'
 export type ScrapeKind =
   | 'single' | 'batch' | 'unified'
   | 'profile' | 'followers' | 'following'
-  | 'search' | 'likers' | null
+  | 'search' | 'likers' | 'profile_deep' | null
 
 export type TaskStatus = 'idle' | 'running' | 'success' | 'error'
 

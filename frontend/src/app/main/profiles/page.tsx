@@ -6,9 +6,10 @@ import {
   Users, Search, Loader2, AlertCircle, CheckCircle,
   Clock, ShieldCheck, ArrowRight, UserCheck, UserX,
   RefreshCw, ChevronDown, ChevronUp, Download, ArrowLeftRight,
+  Play, Image as ImageIcon, Heart, MessageCircle, ExternalLink,
 } from 'lucide-react'
 import { listProfiles, scrapeProfile, scrapeFollowers, scrapeFollowing, computeMutualFollow } from '@/lib/api'
-import type { Profile, FollowerItem, MutualFollowAnalysis } from '@/types'
+import type { Profile, ProfilePost, FollowerItem, MutualFollowAnalysis } from '@/types'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
 import { scrapeStore, useScrapeTask } from '@/lib/scrapeStore'
 
@@ -317,6 +318,61 @@ function FollowAnalysisSection({ username }: { username: string }) {
   )
 }
 
+// ── Sub-komponen: Recent Posts Grid ──────────────────────────────────────────
+function RecentPostsGrid({ posts, router }: { posts: ProfilePost[]; router: ReturnType<typeof useRouter> }) {
+  const [showAll, setShowAll] = useState(false)
+  const displayed = showAll ? posts : posts.slice(0, 12)
+
+  return (
+    <div className="mt-5 pt-4 border-t border-white/5">
+      <h3 className="font-semibold text-sm uppercase tracking-widest text-white/50 mb-3 flex items-center gap-2">
+        <ImageIcon size={14} className="text-white/40" />
+        Recent Posts ({posts.length})
+      </h3>
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+        {displayed.map(post => (
+          <button
+            key={post.shortcode}
+            onClick={() => router.push(`/main/scrapes?url=${encodeURIComponent(post.url)}`)}
+            className="group relative aspect-square rounded-lg overflow-hidden bg-white/5 hover:ring-2 hover:ring-pink-500/40 transition-all"
+            title={`${post.like_count} likes · ${post.comment_count} comments`}
+          >
+            {post.thumbnail_url ? (
+              <img src={post.thumbnail_url} alt="" className="w-full h-full object-cover" loading="lazy"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <ImageIcon size={16} className="text-white/15" />
+              </div>
+            )}
+            {/* Video overlay */}
+            {(post.is_video || post.media_type === 'VIDEO') && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
+                <Play size={16} className="text-white/80" fill="white" />
+              </div>
+            )}
+            {/* Stats overlay on hover */}
+            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+              <div className="flex items-center gap-1 text-[10px] text-white/90">
+                <Heart size={10} className="fill-pink-400 text-pink-400" /> {fmtNum(post.like_count)}
+              </div>
+              <div className="flex items-center gap-1 text-[10px] text-white/90">
+                <MessageCircle size={10} className="text-purple-400" /> {fmtNum(post.comment_count)}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+      {posts.length > 12 && (
+        <button onClick={() => setShowAll(v => !v)}
+          className="btn-glass text-xs mt-3 w-full flex items-center justify-center gap-1.5">
+          {showAll ? <><ChevronUp size={13} /> Sembunyikan</> : <><ChevronDown size={13} /> Tampilkan semua ({posts.length})</>}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════
@@ -530,6 +586,11 @@ export default function ProfilesPage() {
                 </div>
               </div>
             </div>
+
+            {/* Recent Posts Grid */}
+            {scrapeResult.recent_posts && scrapeResult.recent_posts.length > 0 && (
+              <RecentPostsGrid posts={scrapeResult.recent_posts} router={router} />
+            )}
 
             {/* Panel analisis inline di bawah hasil scrape */}
             {analysisTarget === scrapeResult.username && (

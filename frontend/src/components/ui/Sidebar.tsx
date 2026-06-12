@@ -5,20 +5,21 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Search, Users, BarChart2, FileJson,
-  Settings, Wifi, WifiOff, ChevronRight, Hash,
+  Settings, Wifi, WifiOff, ChevronRight, Hash, Layers,
 } from 'lucide-react'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
 import { clsx } from 'clsx'
 import { getHealth, getSession } from '@/lib/api'
 
 const NAV = [
-  { href: '/main/dashboard',  label: 'Dashboard',    icon: LayoutDashboard },
-  { href: '/main/scrapes',    label: 'Scrape Post',  icon: Search },
-  { href: '/main/search',     label: 'Search',       icon: Hash },           // ← BARU
-  { href: '/main/profiles',   label: 'Profiles',     icon: Users },
-  { href: '/main/analytics',  label: 'Analytics',    icon: BarChart2 },
-  { href: '/main/files',      label: 'Output Files', icon: FileJson },
-  { href: '/main/settings',   label: 'Settings',     icon: Settings },
+  { href: '/main/dashboard',    label: 'Dashboard',     icon: LayoutDashboard },
+  { href: '/main/scrapes',      label: 'Scrape Post',   icon: Search },
+  { href: '/main/search',       label: 'Search',        icon: Hash },
+  { href: '/main/deep-scrape',  label: 'Deep Scrape',   icon: Layers },
+  { href: '/main/profiles',     label: 'Profiles',      icon: Users },
+  { href: '/main/analytics',    label: 'Analytics',     icon: BarChart2 },
+  { href: '/main/files',        label: 'Output Files',  icon: FileJson },
+  { href: '/main/settings',     label: 'Settings',      icon: Settings },
 ]
 
 export function Sidebar() {
@@ -97,6 +98,7 @@ export function Sidebar() {
               (href !== '/main/dashboard' && pathname.startsWith(href))
 
             const isSearch = href === '/main/search'
+            const isDeepScrape = href === '/main/deep-scrape'
 
             return (
               <Link
@@ -125,7 +127,9 @@ export function Sidebar() {
                       ? 'text-white'
                       : isSearch
                         ? 'text-pink-400/70 group-hover:text-pink-300'
-                        : 'text-white/40 group-hover:text-white/70',
+                        : isDeepScrape
+                          ? 'text-purple-400/70 group-hover:text-purple-300'
+                          : 'text-white/40 group-hover:text-white/70',
                   )}
                 />
 
@@ -136,17 +140,28 @@ export function Sidebar() {
                       ? 'text-white'
                       : isSearch
                         ? 'text-pink-300/80 group-hover:text-pink-200'
-                        : 'text-white/50 group-hover:text-white/80',
+                        : isDeepScrape
+                          ? 'text-purple-300/80 group-hover:text-purple-200'
+                          : 'text-white/50 group-hover:text-white/80',
                   )}
                 >
                   {label}
                 </span>
 
-                {/* Badge "NEW" untuk Search (hanya kalau tidak active) */}
+                {/* Badge "NEW" untuk Search & Deep Scrape (hanya kalau tidak active) */}
                 {isSearch && !active && (
                   <span
                     className="text-[9px] font-bold px-1.5 py-0.5 rounded-full
                                bg-pink-500/20 border border-pink-500/30 text-pink-300
+                               tracking-wide"
+                  >
+                    NEW
+                  </span>
+                )}
+                {isDeepScrape && !active && (
+                  <span
+                    className="text-[9px] font-bold px-1.5 py-0.5 rounded-full
+                               bg-purple-500/20 border border-purple-500/30 text-purple-300
                                tracking-wide"
                   >
                     NEW

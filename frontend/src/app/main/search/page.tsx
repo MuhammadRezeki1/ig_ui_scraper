@@ -26,7 +26,7 @@ import type {
 import { scrapeStore, useScrapeTask, useScrapeBusy } from '@/lib/scrapeStore'
 
 // ── Constants ────────────────────────────────────────────────────
-const SCRAPE_ROUTE = '/main/scrape'
+const SCRAPE_ROUTE = '/main/scrapes'
 const LIKERS_ROUTE = '/main/likers'
 // Keyword & hashtag = 2 fitur terpisah, masing-masing punya output yang
 // dipersist sendiri lintas-navigasi.

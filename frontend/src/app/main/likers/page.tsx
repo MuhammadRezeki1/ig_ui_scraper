@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useSyncExternalStore } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useSyncExternalStore, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Heart, Link2, Loader2, AlertCircle, Clock,
   Download, Search, Users, BadgeCheck, Lock,
@@ -201,6 +201,7 @@ function DownloadBtn({
 // ══════════════════════════════════════════════════════════════════
 export default function LikersPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // ── Form State ────────────────────────────────────────────────
   const [url, setUrl]             = useState('')
@@ -211,6 +212,12 @@ export default function LikersPage() {
   const [pageDelayMin, setPageDelayMin]                   = useState(1.5)
   const [pageDelayMax, setPageDelayMax]                   = useState(3.0)
   const [showAdvanced, setShowAdvanced]                   = useState(false)
+
+  // ── Read ?url= param on mount ─────────────────────────────────
+  useEffect(() => {
+    const u = searchParams.get('url')
+    if (u) setUrl(u)
+  }, [searchParams])
 
   // ── UI State ──────────────────────────────────────────────────
   // Hasil + status persist lintas-navigasi via scrapeStore.

@@ -544,3 +544,38 @@ export const deleteDeepJob = (job_id: string) =>
     `/api/search/deep/jobs/${encodeURIComponent(job_id)}`,
     { method: 'DELETE' },
   )
+
+// ════════════════════════════════════════════════════════════════
+// PROFILE DEEP SCRAPE API
+// ════════════════════════════════════════════════════════════════
+
+import type {
+  ScrapeProfileDeepRequest,
+  DeepScrapeResult,
+} from '@/types'
+
+/** Mulai deep scrape semua post dari profil (background job). */
+export const scrapeProfileDeep = (req: ScrapeProfileDeepRequest) =>
+  apiFetch<{ job_id: string; kind: string; username: string }>(
+    '/api/scrape/profile/deep',
+    { method: 'POST', body: JSON.stringify(req) },
+  )
+
+/** Lihat progress deep scrape job. */
+export const getDeepScrapeProgress = (job_id: string) =>
+  apiFetch<{
+    job_id: string
+    status: string
+    progress: number | null
+    detail: {
+      total_posts_found: number
+      total_posts_scraped: number
+      total_comments: number
+      total_likers: number
+      errors_count: number
+    }
+  }>(`/api/scrape/profile/deep/${encodeURIComponent(job_id)}/progress`)
+
+/** Ambil hasil lengkap deep scrape dari job yang sudah completed. */
+export const getDeepScrapeResult = (job_id: string) =>
+  apiFetch<DeepScrapeResult>(`/api/jobs/${encodeURIComponent(job_id)}/result`)

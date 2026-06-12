@@ -14,6 +14,9 @@ backend/engine/output/
 # Deep jobs
 backend/engine/deep_jobs/
 
+# Scrape jobs (runtime job state + results)
+backend/engine/scrape_jobs/
+
 # Chrome Profiles
 backend/engine/chrome_profile/
 backend/engine/chrome_profile_playwright/

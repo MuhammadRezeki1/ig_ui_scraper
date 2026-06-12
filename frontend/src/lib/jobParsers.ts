@@ -18,6 +18,7 @@ import type {
   HashtagSearchResult,
   KeywordSearchResult,
   MutualFollowAnalysis,
+  DeepScrapeResult,
 } from '@/types'
 import { computeMutualFollow } from '@/lib/api'
 
@@ -89,5 +90,11 @@ export const JOB_PARSERS: Record<string, JobParser> = {
     const d = (r as ApiResponse<KeywordSearchResult>).data
     if (!d?.success) throw new Error(d?.error ?? r.message ?? 'Gagal')
     return d
+  },
+
+  profile_deep: (r) => {
+    const resp = r as ApiResponse<DeepScrapeResult>
+    if (!resp.success) throw new Error(resp.message || 'Deep scrape gagal')
+    return resp.data
   },
 }
