@@ -26,8 +26,30 @@ import { StatCard } from '@/components/ui/StatCard'
 import { SentimentChart } from '@/components/features/SentimentChart'
 import { CommentList } from '@/components/features/CommentList'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
-import { scrapeStore } from '@/lib/scrapeStore'
-import { CheckpointPanel } from '@/components/features/CheckpointPanel'
+import { scrapeStore, useScrapeTask } from '@/lib/scrapeStore'
+import { CheckpointPanel, CHECKPOINT_KEY } from '@/components/features/CheckpointPanel'
+
+// Key per-mode: tiap sub-fitur (single/unified/batch) menyimpan output
+// terakhirnya SENDIRI, jadi tidak saling menimpa dan tidak hilang saat
+// pindah mode/halaman — hanya ter-refresh saat scrape ulang di mode itu.
+const SCRAPE_KEYS = {
+  single:  'scrapes:single',
+  unified: 'scrapes:unified',
+  batch:   'scrapes:batch',
+} as const
+type ScrapeMode = keyof typeof SCRAPE_KEYS
+
+// Mode terakhir yang dipilih — disimpan di module agar bertahan saat pindah
+// halaman lalu kembali (client-side navigation tidak mereset module).
+let lastScrapesMode: Mode = 'single'
+
+type ScrapeTaskData =
+  | { mode: 'post' | 'unified'; result: PostResult | UnifiedResult }
+  | {
+      mode: 'batch'
+      results: BatchItem[]
+      summary: { total: number; success: number; failed: number }
+    }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -945,7 +967,12 @@ export default function ScrapePage() {
   // ── Mode ──────────────────────────────────────────────────────────
   // 'checkpoint' ditambahkan ke sini hanya sebagai UI state — bukan
   // dikirim ke scrapeStore (yang hanya mengenal 'single'|'batch'|'unified').
-  const [mode, setMode] = useState<Mode>('single')
+  // Saat kembali ke halaman ini: kalau ada sesi checkpoint aktif/berjalan,
+  // buka checkpoint; selain itu kembalikan ke mode terakhir yang dipilih.
+  const [mode, setModeState] = useState<Mode>(() =>
+    scrapeStore.getTask(CHECKPOINT_KEY).status !== 'idle' ? 'checkpoint' : lastScrapesMode,
+  )
+  const setMode = useCallback((m: Mode) => { lastScrapesMode = m; setModeState(m) }, [])
 
   // ── Comments config ───────────────────────────────────────────────
   const [url, setUrl]                       = useState('')
@@ -962,27 +989,32 @@ export default function ScrapePage() {
   const [checkpointSessionActive, setCheckpointSessionActive] = useState(false)
 
   // ── UI state ──────────────────────────────────────────────────────
-  const [loading, setLoading]       = useState(false)
-  const [error, setError]           = useState('')
-  const [warning, setWarning]       = useState('')
+  const [validationError, setValidationError] = useState('')
+  const [warning, setWarning]                  = useState('')
+  const [openComments, setOpenComments]        = useState<number | null>(null)
 
-  // ── Results ───────────────────────────────────────────────────────
-  const [result, setResult]             = useState<PostResult | UnifiedResult | null>(null)
-  const [resultMode, setResultMode]     = useState<'post' | 'unified'>('post')
-  const [batchResults, setBatchResults] = useState<BatchItem[] | null>(null)
-  const [batchSummary, setBatchSummary] = useState<{ total: number; success: number; failed: number } | null>(null)
-  const [openComments, setOpenComments] = useState<number | null>(null)
-
+  // ── Results (persist lintas-navigasi via scrapeStore, per-mode) ───
+  const scrapeKey  = SCRAPE_KEYS[(mode === 'checkpoint' ? 'single' : mode) as ScrapeMode]
+  const task       = useScrapeTask<ScrapeTaskData>(scrapeKey)
   const globalBusy = useScrapeStatus()
+
+  const loading  = task.status === 'running'
+  const taskData = task.status === 'success' ? task.data : null
+  const result       = taskData && taskData.mode !== 'batch' ? taskData.result : null
+  const resultMode: 'post' | 'unified' = taskData && taskData.mode !== 'batch' ? taskData.mode : 'post'
+  const batchResults = taskData && taskData.mode === 'batch' ? taskData.results : null
+  const batchSummary = taskData && taskData.mode === 'batch' ? taskData.summary : null
+  const error        = validationError || (task.status === 'error' ? (task.error ?? '') : '')
 
   const effectiveMaxComments = unlimitedComments ? 0 : maxComments
 
-  useEffect(() => {
-    if (scrapeStore.isBusy()) {
-      const st = scrapeStore.get()
-      setWarning(`Masih ada proses scraping berjalan (${st.kind}: ${st.label}). Tunggu sampai selesai.`)
-    }
-  }, [])
+  // Peringatan: derive secara reaktif supaya banner muncul saat ada proses
+  // LAIN yang berjalan (bukan milik halaman ini) dan hilang sendiri saat selesai.
+  const busyInfo     = scrapeStore.get()
+  const foreignBusy  = globalBusy && task.status !== 'running'
+  const warningMsg   = warning || (foreignBusy
+    ? `Masih ada proses scraping berjalan (${busyInfo.kind}: ${busyInfo.label}). Tunggu sampai selesai.`
+    : '')
 
   // ── Scrape handler — hanya untuk mode non-checkpoint ──────────────
   const handleScrape = useCallback(async () => {
@@ -996,56 +1028,58 @@ export default function ScrapePage() {
     const singleUrl  = url.trim()
     const validBatch = batchUrls.filter(u => u.trim())
 
-    if (mode === 'single'  && !singleUrl)        { setError('Masukkan URL post/reel Instagram'); return }
-    if (mode === 'unified' && !singleUrl)        { setError('Masukkan URL post/reel Instagram'); return }
-    if (mode === 'batch'   && !validBatch.length) { setError('Masukkan minimal 1 URL'); return }
+    if (mode === 'single'  && !singleUrl)         { setValidationError('Masukkan URL post/reel Instagram'); return }
+    if (mode === 'unified' && !singleUrl)         { setValidationError('Masukkan URL post/reel Instagram'); return }
+    if (mode === 'batch'   && !validBatch.length) { setValidationError('Masukkan minimal 1 URL'); return }
 
-    setError(''); setWarning(''); setResult(null)
-    setBatchResults(null); setBatchSummary(null); setOpenComments(null)
+    setValidationError(''); setWarning(''); setOpenComments(null)
 
     const label = mode === 'batch' ? `${validBatch.length} URL` : singleUrl
-    if (!scrapeStore.begin(mode as 'single' | 'batch' | 'unified', label)) {
-      setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
-      return
-    }
 
-    setLoading(true)
-    try {
-      const opts = { include_replies: includeReplies, max_replies_per_comment: maxReplies }
+    // scrapeStore.run() menjaga proses + hasil tetap hidup walau halaman
+    // di-unmount (pindah ke Search/Profile). Hasil ditulis ke key per-mode.
+    const res = await scrapeStore.run<ScrapeTaskData>(
+      SCRAPE_KEYS[mode as ScrapeMode],
+      mode as 'single' | 'batch' | 'unified',
+      label,
+      async (): Promise<ScrapeTaskData> => {
+        const opts = { include_replies: includeReplies, max_replies_per_comment: maxReplies }
 
-      if (mode === 'single') {
-        const resp = await scrapePost(singleUrl, effectiveMaxComments, opts)
-        if (!resp.success) throw new Error(resp.message)
-        setResult(resp.data); setResultMode('post')
+        if (mode === 'single') {
+          const resp = await scrapePost(singleUrl, effectiveMaxComments, opts)
+          if (!resp.success) throw new Error(resp.message)
+          return { mode: 'post', result: resp.data }
+        }
 
-      } else if (mode === 'unified') {
-        const resp = await scrapeUnified({
-          url: singleUrl, max_comments: effectiveMaxComments,
-          include_replies: includeReplies, max_replies_per_comment: maxReplies,
-          scrape_likers: likersConfig.scrapelikers, max_likers: likersConfig.maxLikers,
-          aggressive_likers: likersConfig.aggressiveLikers, checkpoint_size: likersConfig.checkpointSize,
-          checkpoint_delay_min: likersConfig.checkpointDelayMin, checkpoint_delay_max: likersConfig.checkpointDelayMax,
-          page_delay_min: likersConfig.pageDelayMin, page_delay_max: likersConfig.pageDelayMax,
-        })
-        if (!resp.success) throw new Error(resp.message)
-        setResult(resp.data); setResultMode('unified')
+        if (mode === 'unified') {
+          const resp = await scrapeUnified({
+            url: singleUrl, max_comments: effectiveMaxComments,
+            include_replies: includeReplies, max_replies_per_comment: maxReplies,
+            scrape_likers: likersConfig.scrapelikers, max_likers: likersConfig.maxLikers,
+            aggressive_likers: likersConfig.aggressiveLikers, checkpoint_size: likersConfig.checkpointSize,
+            checkpoint_delay_min: likersConfig.checkpointDelayMin, checkpoint_delay_max: likersConfig.checkpointDelayMax,
+            page_delay_min: likersConfig.pageDelayMin, page_delay_max: likersConfig.pageDelayMax,
+          })
+          if (!resp.success) throw new Error(resp.message)
+          return { mode: 'unified', result: resp.data }
+        }
 
-      } else {
         const resp = await scrapePosts(validBatch, effectiveMaxComments, 8, opts)
         if (!resp.success) throw new Error(resp.message)
         const data = resp.data as { total?: number; success?: number; failed?: number; results?: BatchItem[] }
-        setBatchResults(data.results || [])
-        setBatchSummary({
-          total:   data.total   ?? (data.results?.length || 0),
-          success: data.success ?? (data.results?.filter(r => r.success).length || 0),
-          failed:  data.failed  ?? (data.results?.filter(r => !r.success).length || 0),
-        })
-      }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Terjadi kesalahan')
-    } finally {
-      setLoading(false); scrapeStore.finish()
-    }
+        return {
+          mode: 'batch',
+          results: data.results || [],
+          summary: {
+            total:   data.total   ?? (data.results?.length || 0),
+            success: data.success ?? (data.results?.filter(r => r.success).length || 0),
+            failed:  data.failed  ?? (data.results?.filter(r => !r.success).length || 0),
+          },
+        }
+      },
+    )
+
+    if (res.busy) setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
   }, [mode, url, batchUrls, effectiveMaxComments, includeReplies, maxReplies, likersConfig])
 
   const disabled = loading || globalBusy
@@ -1085,8 +1119,9 @@ export default function ScrapePage() {
         </div>
       </div>
 
-      {/* Busy banner */}
-      {globalBusy && !loading && (
+      {/* Busy banner — disembunyikan di mode checkpoint (panelnya sudah
+          menampilkan status batch sendiri) */}
+      {globalBusy && !loading && mode !== 'checkpoint' && (
         <div className="glass-card p-4 mb-6 flex items-start gap-3 border border-yellow-500/20">
           <Clock size={18} className="text-yellow-400 shrink-0 mt-0.5 animate-pulse" />
           <div className="flex-1">
@@ -1269,9 +1304,9 @@ export default function ScrapePage() {
             )}
 
             {/* Warning / Error */}
-            {warning && (
+            {warningMsg && (
               <div className="flex items-start gap-2 text-yellow-300 text-sm glass rounded-xl px-4 py-3">
-                <Clock size={16} className="shrink-0 mt-0.5" /> {warning}
+                <Clock size={16} className="shrink-0 mt-0.5" /> {warningMsg}
               </div>
             )}
             {error && (

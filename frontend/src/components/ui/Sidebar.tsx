@@ -71,7 +71,7 @@ export function Sidebar() {
         <div className="glass rounded-xl px-3 py-2.5 mb-6 flex items-center gap-2.5">
           <div
             className={clsx(
-              'w-2 h-2 rounded-full flex-shrink-0',
+              'w-2 h-2 rounded-full shrink-0',
               engineOk
                 ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
                 : 'bg-red-400',
@@ -84,8 +84,8 @@ export function Sidebar() {
             </p>
           </div>
           {engineOk
-            ? <Wifi size={14} className="text-emerald-400 ml-auto flex-shrink-0" />
-            : <WifiOff size={14} className="text-red-400 ml-auto flex-shrink-0" />
+            ? <Wifi size={14} className="text-emerald-400 ml-auto shrink-0" />
+            : <WifiOff size={14} className="text-red-400 ml-auto shrink-0" />
           }
         </div>
 
@@ -105,8 +105,8 @@ export function Sidebar() {
                 className={clsx(
                   'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative',
                   active
-                    ? 'bg-white/[0.08] border border-white/[0.12]'
-                    : 'hover:bg-white/[0.04] border border-transparent',
+                    ? 'bg-white/8 border border-white/12'
+                    : 'hover:bg-white/4 border border-transparent',
                 )}
               >
                 {/* Left accent bar */}
@@ -120,7 +120,7 @@ export function Sidebar() {
                 <Icon
                   size={18}
                   className={clsx(
-                    'flex-shrink-0 transition-colors',
+                    'shrink-0 transition-colors',
                     active
                       ? 'text-white'
                       : isSearch
@@ -160,7 +160,7 @@ export function Sidebar() {
         </nav>
 
         {/* ── Footer ── */}
-        <div className="pt-4 border-t border-white/[0.06]">
+        <div className="pt-4 border-t border-white/6">
           <div className="text-[10px] text-white/20 text-center">
             IG Scraper v16.1 · FastAPI Bridge
           </div>

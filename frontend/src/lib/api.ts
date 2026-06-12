@@ -36,6 +36,41 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<ApiRespons
   return res.json()
 }
 
+// ── Background Jobs (scraping tahan refresh) ────────────────────
+export type JobStatus = 'pending' | 'running' | 'completed' | 'error'
+
+export interface JobState {
+  job_id: string
+  kind: string
+  label: string
+  status: JobStatus
+  created_at: string
+  updated_at: string
+  error: string | null
+  message: string | null
+}
+
+/** Mulai job scraping di background. Return job_id untuk di-polling. */
+export const startJob = (kind: string, params: Record<string, unknown>) =>
+  apiFetch<{ job_id: string; kind: string }>('/api/jobs/start', {
+    method: 'POST',
+    body: JSON.stringify({ kind, params }),
+  })
+
+/** Status job (untuk polling). */
+export const getJob = (job_id: string) =>
+  apiFetch<JobState>(`/api/jobs/${encodeURIComponent(job_id)}`)
+
+/** Hasil job — ApiResponse yang sama persis seperti endpoint sync dulu. */
+export const getJobResult = <T = unknown>(job_id: string) =>
+  apiFetch<T>(`/api/jobs/${encodeURIComponent(job_id)}/result`)
+
+/** Hapus job + file hasilnya di server. */
+export const deleteJob = (job_id: string) =>
+  apiFetch<{ job_id: string; deleted: boolean }>(
+    `/api/jobs/${encodeURIComponent(job_id)}`, { method: 'DELETE' },
+  )
+
 // ── Health ──────────────────────────────────────────────────────
 export const getHealth = () => apiFetch<HealthData>('/api/health')
 

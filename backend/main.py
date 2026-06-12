@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 from checkpoint_session_api import router as checkpoint_router
 from search_deep_endpoints import deep_search_router
+import job_manager
 
 # ── PATH SETUP ──────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -1503,6 +1504,119 @@ def download_search_csv_inline(req: DownloadSearchInlineRequest):
         media_type="text/csv; charset=utf-8-sig",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# BACKGROUND JOBS — scraping berat dijalankan sebagai job (tahan refresh)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Alur:
+#   POST /api/jobs/start  {kind, params}  → {job_id}  (langsung balik, worker jalan di thread)
+#   GET  /api/jobs/{id}                   → status (pending/running/completed/error)
+#   GET  /api/jobs/{id}/result            → ApiResponse hasil (sama persis seperti endpoint sync)
+#   DELETE /api/jobs/{id}                 → hapus job
+#
+# Worker memanggil kembali fungsi endpoint sync yang sudah ada (satu sumber
+# logika: tetap menyimpan output file, _meta, pesan, dll).
+
+class StartJobRequest(BaseModel):
+    kind: str
+    params: dict = {}
+
+
+def _job_dispatch(kind: str, params: dict) -> dict:
+    """Map kind → fungsi endpoint sync. Mengembalikan ApiResponse dict."""
+    try:
+        if kind == "post":
+            return scrape_post(ScrapePostRequest(**params))
+        if kind == "batch":
+            return scrape_posts_batch(ScrapePostsRequest(**params))
+        if kind == "unified":
+            return scrape_post_unified(ScrapeUnifiedRequest(**params))
+        if kind == "likers":
+            return scrape_post_likers(ScrapePostLikersRequest(**params))
+        if kind == "profile":
+            return scrape_profile(ScrapeProfileRequest(**params))
+        if kind == "followers":
+            return scrape_followers(ScrapeFollowersRequest(**params))
+        if kind == "following":
+            return scrape_following(ScrapeFollowingRequest(**params))
+        if kind == "verified":
+            return scrape_following_verified(ScrapeFollowingVerifiedRequest(**params))
+        if kind == "mutual":
+            # Followers + Following sekaligus untuk analisis mutual follow.
+            uname    = extract_username(params.get("username", ""))
+            max_count = int(params.get("max_count", 500))
+            followers = run_followers_scraper(uname, max_count)
+            following = run_following_scraper(uname, max_count)
+            return success(
+                {
+                    "username":  uname,
+                    "followers": followers.get("items", []),
+                    "following": following.get("items", []),
+                },
+                f"Mutual @{uname}: {len(followers.get('items', []))} followers · "
+                f"{len(following.get('items', []))} following",
+            )
+        if kind == "search_hashtag":
+            return search_hashtag_endpoint(SearchHashtagRequest(**params))
+        if kind == "search_keyword":
+            return search_keyword_endpoint(SearchKeywordRequest(**params))
+        return failure(f"Job kind tidak dikenal: {kind}")
+    except HTTPException as he:
+        return failure(str(he.detail))
+    except Exception as e:
+        traceback.print_exc()
+        return failure(str(e))
+
+
+@app.post("/api/jobs/start")
+def start_job(req: StartJobRequest):
+    label = (
+        req.params.get("url")
+        or req.params.get("username")
+        or req.params.get("hashtag")
+        or req.params.get("keyword")
+        or req.kind
+    )
+    job_id = job_manager.create_job(req.kind, req.params, _job_dispatch, label=str(label))
+    return success({"job_id": job_id, "kind": req.kind}, f"Job {req.kind} dimulai")
+
+
+@app.get("/api/jobs")
+def list_jobs():
+    return success({"jobs": job_manager.list_jobs()})
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job_status(job_id: str):
+    st = job_manager.get_job(job_id)
+    if not st:
+        return failure(f"Job '{job_id}' tidak ditemukan", {"status": "not_found"})
+    return success(st)
+
+
+@app.get("/api/jobs/{job_id}/result")
+def get_job_result(job_id: str):
+    st = job_manager.get_job(job_id)
+    if not st:
+        return failure(f"Job '{job_id}' tidak ditemukan", {"status": "not_found"})
+    if st.get("status") == job_manager.JobStatus.ERROR:
+        return failure(st.get("error") or "Job error", {"status": "error"})
+    if st.get("status") != job_manager.JobStatus.COMPLETED:
+        return failure(f"Job belum selesai (status: {st.get('status')})",
+                       {"status": st.get("status")})
+    result = job_manager.get_job_result(job_id)
+    if result is None:
+        return failure("Hasil job tidak ditemukan", {"status": "missing_result"})
+    # result sudah berbentuk ApiResponse {success, message, data} — kirim apa adanya.
+    return result
+
+
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str):
+    ok = job_manager.delete_job(job_id)
+    return success({"job_id": job_id, "deleted": ok})
 
 
 # ════════════════════════════════════════════════════════════════════════════

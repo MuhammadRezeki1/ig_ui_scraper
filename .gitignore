@@ -36,3 +36,6 @@ frontend/.env.local
 
 # Cache
 .cache/
+
+# Checkpoint sessions
+backend/engine/checkpoint_sessions/

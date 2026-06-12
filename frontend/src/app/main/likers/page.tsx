@@ -16,7 +16,9 @@ import {
 } from '@/lib/api'
 import type { LikersResult, LikerItem } from '@/types'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
-import { scrapeStore } from '@/lib/scrapeStore'
+import { scrapeStore, useScrapeTask } from '@/lib/scrapeStore'
+
+const LIKERS_KEY = 'likers:main'
 
 function useScrapeStatus() {
   return useSyncExternalStore(
@@ -211,10 +213,13 @@ export default function LikersPage() {
   const [showAdvanced, setShowAdvanced]                   = useState(false)
 
   // ── UI State ──────────────────────────────────────────────────
-  const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState('')
-  const [warning, setWarning]     = useState('')
-  const [result, setResult]       = useState<LikersResult | null>(null)
+  // Hasil + status persist lintas-navigasi via scrapeStore.
+  const task    = useScrapeTask<LikersResult>(LIKERS_KEY)
+  const loading = task.status === 'running'
+  const result  = task.status === 'success' ? task.data : null
+  const [localError, setLocalError] = useState('')   // error validasi / download
+  const [warning, setWarning]       = useState('')
+  const error = localError || (task.status === 'error' ? (task.error ?? '') : '')
 
   // ── Liker List UI ─────────────────────────────────────────────
   const [search, setSearch]                 = useState('')
@@ -253,47 +258,43 @@ export default function LikersPage() {
       return
     }
     if (!url.trim()) {
-      setError('Masukkan URL post Instagram')
+      setLocalError('Masukkan URL post Instagram')
       return
     }
     if (checkpointDelayMin > checkpointDelayMax) {
-      setError('Checkpoint delay min tidak boleh > max')
+      setLocalError('Checkpoint delay min tidak boleh > max')
       return
     }
 
-    setError('')
+    setLocalError('')
     setWarning('')
-    setResult(null)
     setSearch('')
     setFilterVerified(false)
     setFilterPrivate('all')
     setShowAll(false)
 
     const label = url.trim()
-    if (!scrapeStore.begin('single', label)) {
-      setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
-      return
-    }
+    // scrapeStore.run() menjaga proses + hasil tetap hidup walau pindah halaman.
+    const res = await scrapeStore.run<LikersResult>(
+      LIKERS_KEY,
+      'likers',
+      label,
+      async () => {
+        const resp = await scrapePostLikers({
+          url: url.trim(),
+          max_likers: maxLikers,
+          checkpoint_size: checkpointSize,
+          checkpoint_delay_min: checkpointDelayMin,
+          checkpoint_delay_max: checkpointDelayMax,
+          page_delay_min: pageDelayMin,
+          page_delay_max: pageDelayMax,
+        })
+        if (!resp.success) throw new Error(resp.message)
+        return resp.data
+      },
+    )
 
-    setLoading(true)
-    try {
-      const resp = await scrapePostLikers({
-        url: url.trim(),
-        max_likers: maxLikers,
-        checkpoint_size: checkpointSize,
-        checkpoint_delay_min: checkpointDelayMin,
-        checkpoint_delay_max: checkpointDelayMax,
-        page_delay_min: pageDelayMin,
-        page_delay_max: pageDelayMax,
-      })
-      if (!resp.success) throw new Error(resp.message)
-      setResult(resp.data)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Terjadi kesalahan')
-    } finally {
-      setLoading(false)
-      scrapeStore.finish()
-    }
+    if (res.busy) setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
   }
 
   // ── Download helpers ─────────────────────────────────────────
@@ -306,7 +307,7 @@ export default function LikersPage() {
         : `likers_${result.shortcode}`
       await downloadLikersInline(result.likers, hint)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Download gagal')
+      setLocalError(e instanceof Error ? e.message : 'Download gagal')
     } finally {
       setDownloading(false)
     }
@@ -680,7 +681,7 @@ export default function LikersPage() {
             <div className="glass-card p-5">
               <div className="flex flex-wrap items-center gap-3 mb-5">
                 {/* Search */}
-                <div className="relative flex-1 min-w-[200px]">
+                <div className="relative flex-1 min-w-50">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
                   <input
                     type="text"
@@ -752,7 +753,7 @@ export default function LikersPage() {
                     : 'Tidak ada liker'}
                 </div>
               ) : (
-                <div className="max-h-[600px] overflow-y-auto pr-1 space-y-0">
+                <div className="max-h-150 overflow-y-auto pr-1 space-y-0">
                   {displayed.map((liker, i) => (
                     <LikerRow key={liker.user_id || liker.username} liker={liker} index={i} />
                   ))}
