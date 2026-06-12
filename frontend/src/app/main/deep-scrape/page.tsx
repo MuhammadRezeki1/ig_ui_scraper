@@ -15,7 +15,7 @@ import {
 import type { DeepScrapeResult, DeepScrapePostEntry, DeepScrapeComment, DeepScrapeLiker, DeepScrapePostData } from '@/types'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
 import { StatCard } from '@/components/ui/StatCard'
-import { scrapeStore, useScrapeTask } from '@/lib/scrapeStore'
+import { scrapeStore, useScrapeTask, useScrapeBusy } from '@/lib/scrapeStore'
 
 const DEEP_KEY = 'deep-scrape:main'
 
@@ -318,6 +318,16 @@ export default function DeepScrapePage() {
   const error = localError || (task.status === 'error' ? (task.error ?? '') : '')
   const [validationError, setValidationError] = useState('')
 
+  // ── Global busy lock — blokir saat ada scrape LAIN yang berjalan ──
+  // Sama seperti halaman lain (Scrape Post / Profiles / Likers): backend hanya
+  // punya satu sesi browser, jadi dua scrape berat bersamaan akan tabrakan.
+  const globalBusy = useScrapeBusy()
+  const busyInfo = scrapeStore.get()
+  const foreignBusy = globalBusy && task.status !== 'running'
+  const busyWarning = foreignBusy
+    ? `Masih ada proses scraping berjalan (${busyInfo.kind}: ${busyInfo.label}). Tunggu sampai selesai.`
+    : ''
+
   // ── Progress polling (module-level, resumes after navigation) ──
   const [progress, setProgress] = useState<ProgressDetail | null>(_deepProgress)
   const [jobStatus, setJobStatus] = useState(_deepJobStatus)
@@ -367,6 +377,12 @@ export default function DeepScrapePage() {
     }
     setValidationError('')
     setLocalError('')
+
+    // Tolak bila ada proses scraping lain yang sedang berjalan.
+    if (scrapeStore.isBusy()) {
+      setLocalError('Tunggu dulu — proses scraping sebelumnya belum selesai.')
+      return
+    }
 
     // Reset module-level progress for new job
     _deepJobId = null
@@ -437,7 +453,7 @@ export default function DeepScrapePage() {
     setLocalError('')
   }
 
-  const disabled = loading
+  const disabled = loading || globalBusy
 
   return (
     <div className="p-8 max-w-5xl">
@@ -688,6 +704,13 @@ export default function DeepScrapePage() {
           </div>
         )}
 
+        {/* Busy warning — ada proses scraping lain yang masih berjalan */}
+        {busyWarning && (
+          <div className="flex items-start gap-2 text-yellow-300 text-sm glass rounded-xl px-4 py-3">
+            <Clock size={16} className="shrink-0 mt-0.5" /> {busyWarning}
+          </div>
+        )}
+
         {/* Errors */}
         {validationError && (
           <div className="flex items-center gap-2 text-red-400 text-sm glass rounded-xl px-4 py-3">
@@ -707,8 +730,8 @@ export default function DeepScrapePage() {
             disabled={disabled}
             className="btn-ig flex items-center gap-2 px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {disabled ? <Loader2 size={16} className="animate-spin" /> : <Layers size={16} />}
-            {loading ? 'Memproses...' : 'Mulai Deep Scrape'}
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Layers size={16} />}
+            {loading ? 'Memproses...' : foreignBusy ? 'Menunggu proses lain...' : 'Mulai Deep Scrape'}
           </button>
         </div>
       </div>
