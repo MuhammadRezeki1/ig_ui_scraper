@@ -3,17 +3,15 @@
 import { useState, useEffect, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Users, Search, Loader2, AlertCircle, CheckCircle,
-  Clock, ShieldCheck, ArrowRight, UserCheck, UserX,
-  RefreshCw, ChevronDown, ChevronUp, Download, ArrowLeftRight,
-  Play, Image as ImageIcon, Heart, MessageCircle, ExternalLink,
+  Users, Loader2, AlertCircle, CheckCircle,
+  ShieldCheck, ArrowRight, UserCheck, UserX,
+  RefreshCw, ChevronDown, ChevronUp, Download, ArrowLeftRight, Layers,
 } from 'lucide-react'
-import { listProfiles, scrapeProfile, scrapeFollowers, scrapeFollowing, computeMutualFollow } from '@/lib/api'
-import type { Profile, ProfilePost, FollowerItem, MutualFollowAnalysis } from '@/types'
+import { listProfiles, scrapeFollowers, scrapeFollowing, computeMutualFollow } from '@/lib/api'
+import type { Profile, FollowerItem, MutualFollowAnalysis } from '@/types'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
 import { scrapeStore, useScrapeTask } from '@/lib/scrapeStore'
-
-const PROFILE_SCRAPE_KEY = 'profiles:scrape'
+import { ProfileDeepScrapePanel } from './ProfileDeepScrapePanel'
 
 function useScrapeStatus() {
   return useSyncExternalStore(
@@ -318,61 +316,6 @@ function FollowAnalysisSection({ username }: { username: string }) {
   )
 }
 
-// ── Sub-komponen: Recent Posts Grid ──────────────────────────────────────────
-function RecentPostsGrid({ posts, router }: { posts: ProfilePost[]; router: ReturnType<typeof useRouter> }) {
-  const [showAll, setShowAll] = useState(false)
-  const displayed = showAll ? posts : posts.slice(0, 12)
-
-  return (
-    <div className="mt-5 pt-4 border-t border-white/5">
-      <h3 className="font-semibold text-sm uppercase tracking-widest text-white/50 mb-3 flex items-center gap-2">
-        <ImageIcon size={14} className="text-white/40" />
-        Recent Posts ({posts.length})
-      </h3>
-      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-        {displayed.map(post => (
-          <button
-            key={post.shortcode}
-            onClick={() => router.push(`/main/scrapes?url=${encodeURIComponent(post.url)}`)}
-            className="group relative aspect-square rounded-lg overflow-hidden bg-white/5 hover:ring-2 hover:ring-pink-500/40 transition-all"
-            title={`${post.like_count} likes · ${post.comment_count} comments`}
-          >
-            {post.thumbnail_url ? (
-              <img src={post.thumbnail_url} alt="" className="w-full h-full object-cover" loading="lazy"
-                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <ImageIcon size={16} className="text-white/15" />
-              </div>
-            )}
-            {/* Video overlay */}
-            {(post.is_video || post.media_type === 'VIDEO') && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
-                <Play size={16} className="text-white/80" fill="white" />
-              </div>
-            )}
-            {/* Stats overlay on hover */}
-            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
-              <div className="flex items-center gap-1 text-[10px] text-white/90">
-                <Heart size={10} className="fill-pink-400 text-pink-400" /> {fmtNum(post.like_count)}
-              </div>
-              <div className="flex items-center gap-1 text-[10px] text-white/90">
-                <MessageCircle size={10} className="text-purple-400" /> {fmtNum(post.comment_count)}
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-      {posts.length > 12 && (
-        <button onClick={() => setShowAll(v => !v)}
-          className="btn-glass text-xs mt-3 w-full flex items-center justify-center gap-1.5">
-          {showAll ? <><ChevronUp size={13} /> Sembunyikan</> : <><ChevronDown size={13} /> Tampilkan semua ({posts.length})</>}
-        </button>
-      )}
-    </div>
-  )
-}
-
 // ════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ════════════════════════════════════════════════════════════════════════════
@@ -380,31 +323,13 @@ function RecentPostsGrid({ posts, router }: { posts: ProfilePost[]; router: Retu
 export default function ProfilesPage() {
   const router = useRouter()
 
-  const [profiles,       setProfiles]       = useState<Profile[]>([])
-  const [loading,        setLoading]        = useState(true)
-  const [scrapeUsername, setScrapeUsername] = useState('')
-  const [validationError, setValidationError] = useState('')
-  const [warning,        setWarning]        = useState('')
-
-  // Hasil + status scrape profile persist lintas-navigasi via scrapeStore.
-  const scrapeTask   = useScrapeTask<Profile>(PROFILE_SCRAPE_KEY)
-  const scraping     = scrapeTask.status === 'running'
-  const scrapeResult = scrapeTask.status === 'success' ? scrapeTask.data : null
-  const error        = validationError || (scrapeTask.status === 'error' ? (scrapeTask.error ?? '') : '')
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [loading,  setLoading]  = useState(true)
 
   /** Username yang sedang ditampilkan panel analisis follow-nya */
   const [analysisTarget, setAnalysisTarget] = useState<string | null>(null)
-
-  const globalBusy = useScrapeStatus()
-
-  // Peringatan derive reaktif: muncul saat ada proses LAIN berjalan,
-  // hilang sendiri saat selesai. (Tidak pakai setState-in-effect.)
-  const busyInfo    = scrapeStore.get()
-  const foreignBusy = globalBusy && scrapeTask.status !== 'running'
-  const warningMsg  = warning || (foreignBusy
-    ? `Masih ada proses scraping berjalan (${busyInfo.kind === 'batch' ? 'batch' : busyInfo.kind}: ${busyInfo.label}). ` +
-      `Tunggu sampai selesai sebelum memulai scrape baru.`
-    : '')
+  /** Username yang sedang ditampilkan panel deep scrape-nya */
+  const [deepTarget, setDeepTarget] = useState<string | null>(null)
 
   useEffect(() => {
     listProfiles()
@@ -412,41 +337,6 @@ export default function ProfilesPage() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
-
-  async function handleScrape() {
-    if (scrapeStore.isBusy()) {
-      setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
-      return
-    }
-
-    const u = scrapeUsername.trim().replace('@', '').replace('https://www.instagram.com/', '').replace(/\/$/, '')
-    if (!u) { setValidationError('Masukkan username'); return }
-
-    setValidationError('')
-    setWarning('')
-
-    const res = await scrapeStore.run<Profile>(
-      PROFILE_SCRAPE_KEY,
-      'profile',
-      `@${u}`,
-      async () => {
-        const resp = await scrapeProfile(u)
-        if (!resp.success) throw new Error(resp.message)
-
-        const prof = (resp.data as Record<string, unknown>)?.profile ?? resp.data
-        if (!prof || !(prof as Profile).username) {
-          throw new Error('Data profile kosong / format tidak dikenali')
-        }
-        // Refresh daftar tracked (side-effect; aman walau komponen sudah unmount).
-        listProfiles().then(r => { if (r.success) setProfiles(r.data.users) }).catch(() => {})
-        return prof as Profile
-      },
-    )
-
-    if (res.busy) setWarning('Tunggu dulu — proses scraping sebelumnya belum selesai.')
-  }
-
-  const disabled = scraping || globalBusy
 
   return (
     <div className="p-8 max-w-5xl">
@@ -466,140 +356,9 @@ export default function ProfilesPage() {
         </button>
       </div>
 
-      {/* Banner: scraping lain masih berjalan */}
-      {globalBusy && !scraping && (
-        <div className="glass-card p-4 mb-6 flex items-start gap-3 border border-yellow-500/20">
-          <Clock size={18} className="text-yellow-400 shrink-0 mt-0.5 animate-pulse" />
-          <div className="flex-1">
-            <p className="text-sm text-yellow-300 font-medium">Scraping masih berjalan</p>
-            <p className="text-xs text-white/50 mt-0.5">
-              Proses scraping yang dimulai sebelumnya belum selesai. Tunggu sampai selesai sebelum memulai scrape baru.
-            </p>
-            <button onClick={() => router.push('/main/files')} className="btn-glass text-xs mt-2">
-              Lihat Output Files
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Scrape Input ── */}
+      {/* ── Scrape Profil + Postingan (deep, satu langkah) ── */}
       <div className="glass-card p-6 mb-6">
-        <h2 className="font-semibold mb-4 text-sm uppercase tracking-widest text-white/50">
-          Scrape Profile Baru
-        </h2>
-        <div className="flex gap-3">
-          <div className="relative flex-1">
-            <input
-              type="text"
-              value={scrapeUsername}
-              disabled={disabled}
-              onChange={e => setScrapeUsername(e.target.value)}
-              placeholder="username atau paste URL instagram.com/username"
-              className="input-glass disabled:opacity-50"
-              onKeyDown={e => e.key === 'Enter' && handleScrape()}
-            />
-          </div>
-          <button
-            onClick={handleScrape}
-            disabled={disabled}
-            className="btn-ig flex items-center gap-2 px-5 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {disabled ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-            {scraping ? 'Memproses...' : globalBusy ? 'Menunggu...' : 'Scrape'}
-          </button>
-        </div>
-
-        {warningMsg && (
-          <div className="mt-3 flex items-center gap-2 text-yellow-300 text-sm glass rounded-xl px-4 py-2.5">
-            <Clock size={14} /> {warningMsg}
-          </div>
-        )}
-        {error && (
-          <div className="mt-3 flex items-center gap-2 text-red-400 text-sm glass rounded-xl px-4 py-2.5">
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
-
-        {/* Scrape Result */}
-        {scrapeResult && (
-          <div className="mt-4 glass rounded-2xl p-5">
-            <div className="flex items-start gap-4">
-              <div className="w-16 h-16 rounded-full overflow-hidden glass flex items-center justify-center text-2xl shrink-0">
-                {scrapeResult.profile_pic_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={scrapeResult.profile_pic_url}
-                    alt={scrapeResult.username}
-                    className="w-full h-full object-cover"
-                    onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-                  />
-                ) : (
-                  <Users size={24} className="text-white/30" />
-                )}
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-bold text-lg">@{scrapeResult.username}</h3>
-                  {scrapeResult.is_verified && <CheckCircle size={18} className="text-blue-400" />}
-                </div>
-                <p className="text-white/60 text-sm mb-3">{scrapeResult.full_name}</p>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { label: 'Followers', value: fmtNum(scrapeResult.followers) },
-                    { label: 'Following', value: fmtNum(scrapeResult.following) },
-                    { label: 'Posts',     value: fmtNum(scrapeResult.posts_count) },
-                  ].map(s => (
-                    <div key={s.label} className="glass rounded-xl p-3 text-center">
-                      <p className="text-lg font-bold ig-text">{s.value}</p>
-                      <p className="text-xs text-white/40">{s.label}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
-                  {scrapeResult.engagement_summary && (
-                    <div className="flex items-center gap-4 text-xs text-white/50">
-                      <span>📊 {scrapeResult.engagement_summary.posts_analyzed} post dianalisis</span>
-                      <span className="text-emerald-400 font-semibold">
-                        {scrapeResult.engagement_summary.engagement_rate}% engagement
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        setAnalysisTarget(
-                          analysisTarget === scrapeResult.username ? null : scrapeResult.username
-                        )
-                      }}
-                      className="btn-glass text-xs flex items-center gap-1.5 px-3 py-1.5"
-                    >
-                      <ArrowLeftRight size={12} />
-                      {analysisTarget === scrapeResult.username ? 'Tutup Analisis' : 'Analisis Follow'}
-                    </button>
-                    <button
-                      onClick={() => router.push(`/main/profiles/${scrapeResult.username}`)}
-                      className="btn-ig text-xs flex items-center gap-1.5 px-3 py-1.5"
-                    >
-                      Lihat Detail <ArrowRight size={12} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Posts Grid */}
-            {scrapeResult.recent_posts && scrapeResult.recent_posts.length > 0 && (
-              <RecentPostsGrid posts={scrapeResult.recent_posts} router={router} />
-            )}
-
-            {/* Panel analisis inline di bawah hasil scrape */}
-            {analysisTarget === scrapeResult.username && (
-              <div className="mt-4">
-                <FollowAnalysisSection username={scrapeResult.username} />
-              </div>
-            )}
-          </div>
-        )}
+        <ProfileDeepScrapePanel />
       </div>
 
       {/* ── Tracked Profiles ── */}
@@ -674,6 +433,19 @@ export default function ProfilesPage() {
                       <ArrowLeftRight size={12} />
                       <span className="hidden sm:inline">Follow</span>
                     </button>
+                    {/* Tombol deep scrape */}
+                    <button
+                      title="Deep Scrape (komentar, balasan & likers tiap post)"
+                      onClick={() =>
+                        setDeepTarget(deepTarget === p.username ? null : p.username)
+                      }
+                      className={`btn-glass text-xs flex items-center gap-1 px-2.5 py-1.5 transition-all ${
+                        deepTarget === p.username ? 'ring-1 ring-pink-400/50 text-pink-300' : ''
+                      }`}
+                    >
+                      <Layers size={12} />
+                      <span className="hidden sm:inline">Deep</span>
+                    </button>
                     {/* Tombol detail */}
                     <button
                       onClick={() => router.push(`/main/profiles/${p.username}`)}
@@ -688,6 +460,13 @@ export default function ProfilesPage() {
                 {analysisTarget === p.username && (
                   <div className="mt-2 ml-2 border-l-2 border-indigo-500/30 pl-4">
                     <FollowAnalysisSection username={p.username} />
+                  </div>
+                )}
+
+                {/* Panel deep scrape (expand di bawah baris) */}
+                {deepTarget === p.username && (
+                  <div className="mt-2 ml-2 border-l-2 border-pink-500/30 pl-4">
+                    <ProfileDeepScrapePanel initialUsername={p.username} locked />
                   </div>
                 )}
               </div>

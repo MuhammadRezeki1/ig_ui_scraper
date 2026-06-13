@@ -194,6 +194,25 @@ class ScrapeProfileDeepRequest(BaseModel):
     # Jeda antar post (detik) — supaya tidak kena rate-limit
     delay_between_posts: int = 15
 
+    # Mode pemilihan komentar tiap post:
+    #   "recent" → ambil komentar sesuai urutan Instagram (default, perilaku lama)
+    #   "top"    → ambil pool komentar lalu pilih max_comments dengan like terbanyak
+    comment_sort: str = "recent"
+    # Banyak komentar yang diambil dulu sebelum diurutkan (khusus mode "top").
+    # 50 ≈ satu halaman GraphQL → cukup untuk menangkap komentar paling banyak
+    # like (IG mengembalikan komentar populer lebih dulu) dan jauh lebih cepat.
+    top_comment_pool: int = 50
+    # Sertakan info profil (followers/following/posts_count) di hasil JSON.
+    include_profile_info: bool = True
+
+    @field_validator("comment_sort")
+    @classmethod
+    def validate_comment_sort(cls, v: str) -> str:
+        v = (v or "recent").strip().lower()
+        if v not in ("recent", "top"):
+            raise ValueError("comment_sort harus 'recent' atau 'top'.")
+        return v
+
     @field_validator("max_comments")
     @classmethod
     def validate_max_comments(cls, v: int) -> int:
@@ -566,6 +585,9 @@ def run_profile_deep_scraper(
     max_likers: int,
     aggressive_likers: bool,
     delay_between_posts: int,
+    comment_sort: str = "recent",
+    top_comment_pool: int = 50,
+    include_profile_info: bool = True,
     progress_callback=None,
 ) -> dict:
     """
@@ -584,6 +606,9 @@ def run_profile_deep_scraper(
     _dt = 'None' if date_to is None else json.dumps(date_to)
     # Username sebagai JSON-quoted string (untuk embedding di code, bukan di f-string)
     _un_json = json.dumps(username)
+    _cs_json = json.dumps(comment_sort)               # "recent" | "top"
+    _top_pool = int(top_comment_pool) if top_comment_pool and top_comment_pool > 0 else 50
+    _incl_profile = bool(include_profile_info)
 
     script = f"""
 import sys, os, json, time, random, traceback
@@ -594,6 +619,13 @@ from scraper_post import InstagramScraperV16
 
 OUTPUT_DIR = r'{OUTPUT_DIR}'
 _UN = {_un_json}   # username sebagai variabel Python (hindari quote conflict di f-string)
+_COMMENT_SORT = {_cs_json}      # "recent" | "top"
+_TOP_POOL = {_top_pool}         # pool komentar sebelum diurutkan (mode "top")
+_KEEP_N = {max_comments}        # berapa komentar disimpan tiap post
+_INCL_PROFILE = {_incl_profile} # ikutkan info profil di hasil
+
+# Mode "top": ambil pool dulu (biar ada bahan diurutkan), baru dipangkas.
+_fetch_comments = _TOP_POOL if _COMMENT_SORT == "top" else _KEEP_N
 
 def _save(data, fname):
     safe = ''.join(c if c.isalnum() or c in '._-' else '_' for c in fname) or 'unknown'
@@ -608,6 +640,8 @@ result_summary = {{
     "date_from": {_df},
     "date_to": {_dt},
     "scraped_at": datetime.now().isoformat(),
+    "comment_sort": _COMMENT_SORT,
+    "profile": None,
     "total_posts_found": 0,
     "total_posts_scraped": 0,
     "total_comments": 0,
@@ -621,11 +655,34 @@ result_summary = {{
 
 t_start = time.time()
 
-# ── Phase 1: kumpulkan URL post ──
-print(f"\\n[DeepScraper] Phase 1: Ambil daftar post @{{_UN}}...")
+# ── Phase 1: info profil + daftar post (SATU sesi browser, hemat waktu) ──
+print(f"\\n[DeepScraper] Phase 1: Ambil info profil + daftar post @{{_UN}}...")
 
 try:
     with InstagramProfileScraper() as prof:
+        # Info profil (followers/following/posts) — sekalian di sesi yang sama
+        # supaya tidak buka browser dua kali.
+        if _INCL_PROFILE:
+            try:
+                _pinfo = prof.scrape_profile(_UN)
+                if isinstance(_pinfo, dict):
+                    result_summary["profile"] = {{
+                        "username":     _pinfo.get("username", _UN),
+                        "full_name":    _pinfo.get("full_name", ""),
+                        "biography":    _pinfo.get("biography", ""),
+                        "is_verified":  _pinfo.get("is_verified", False),
+                        "is_private":   _pinfo.get("is_private", False),
+                        "followers":    _pinfo.get("followers", 0),
+                        "following":    _pinfo.get("following", 0),
+                        "posts_count":  _pinfo.get("posts_count", 0),
+                        "profile_pic_url": _pinfo.get("profile_pic_url", ""),
+                    }}
+                    print(f"[DeepScraper] Profil: {{result_summary['profile'].get('followers')}} followers, "
+                          f"{{result_summary['profile'].get('posts_count')}} posts")
+            except Exception as e:
+                result_summary["errors"].append({{"phase": "0_profile", "error": str(e)}})
+                print(f"[DeepScraper] Info profil gagal (lanjut tanpa): {{e}}")
+
         feed_result = prof.scrape_profile_posts(
             _UN,
             date_from={_df},
@@ -724,7 +781,7 @@ for idx, post_meta in enumerate(posts_feed, 1):
             with InstagramScraperV16() as scraper:
                 unified_data = scraper.scrape_post_unified(
                     post_url,
-                    max_comments={max_comments},
+                    max_comments=_fetch_comments,
                     include_replies={include_replies},
                     max_replies_per_comment={max_replies_per_comment},
                     scrape_likers={scrape_likers},
@@ -752,6 +809,17 @@ for idx, post_meta in enumerate(posts_feed, 1):
             time.sleep(cool)
 
     if unified_data is not None:
+        # Mode "top": dari pool komentar, simpan hanya yang like-nya terbanyak.
+        if _COMMENT_SORT == "top" and isinstance(unified_data.get("comments"), list):
+            _pool = unified_data["comments"]
+            _keep = _KEEP_N if _KEEP_N > 0 else 10
+            _sorted = sorted(_pool, key=lambda c: c.get("like_count", 0) or 0, reverse=True)[:_keep]
+            unified_data["comment_pool_fetched"] = len(_pool)
+            unified_data["comment_selection"] = "top_by_likes"
+            unified_data["comments"] = _sorted
+            unified_data["comments_count"] = len(_sorted)
+            unified_data["replies_count"] = sum(len(c.get("replies", []) or []) for c in _sorted)
+
         cc = unified_data.get("comments_count", 0)
         rc = unified_data.get("replies_count", 0)
         lf = unified_data.get("likers_fetched", 0)
@@ -781,7 +849,9 @@ for idx, post_meta in enumerate(posts_feed, 1):
     result_summary["posts"].append(post_entry)
 
     if idx < total_found:
-        jeda = {delay_between_posts} + random.randint(3, 8)
+        # Browser fresh tiap post sudah memberi jeda alami (~6s), jadi jeda
+        # tambahan dibuat kecil saja supaya efisien.
+        jeda = {delay_between_posts} + random.randint(1, 3)
         print(f"[DeepScraper] Jeda {{jeda}}s...")
         time.sleep(jeda)
 
@@ -2000,6 +2070,9 @@ def _job_dispatch(kind: str, params: dict) -> dict:
                     max_likers=p.max_likers,
                     aggressive_likers=p.aggressive_likers,
                     delay_between_posts=p.delay_between_posts,
+                    comment_sort=p.comment_sort,
+                    top_comment_pool=p.top_comment_pool,
+                    include_profile_info=p.include_profile_info,
                 )
                 if not result.get("success"):
                     return failure(

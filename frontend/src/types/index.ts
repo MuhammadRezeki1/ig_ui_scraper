@@ -748,6 +748,24 @@ export interface ScrapeProfileDeepRequest {
   max_likers?: number
   aggressive_likers?: boolean
   delay_between_posts?: number
+  /** "recent" = urutan IG (default) | "top" = max_comments dengan like terbanyak */
+  comment_sort?: 'recent' | 'top'
+  /** Banyak komentar diambil dulu sebelum diurutkan (mode "top") */
+  top_comment_pool?: number
+  /** Sertakan info profil (followers/following/posts) di hasil */
+  include_profile_info?: boolean
+}
+
+export interface DeepScrapeProfile {
+  username: string
+  full_name: string
+  biography: string
+  is_verified: boolean
+  is_private: boolean
+  followers: number
+  following: number
+  posts_count: number
+  profile_pic_url?: string
 }
 
 export interface DeepScrapePostEntry {
@@ -817,6 +835,10 @@ export interface DeepScrapePostData {
   replies_count: number
   likers: DeepScrapeLiker[]
   likers_fetched: number
+  /** "top_by_likes" bila mode top dipakai */
+  comment_selection?: string
+  /** Berapa komentar diambil dari pool sebelum dipangkas (mode top) */
+  comment_pool_fetched?: number
   [key: string]: unknown
 }
 
@@ -832,6 +854,8 @@ export interface DeepScrapeResult {
   date_from: string | null
   date_to: string | null
   scraped_at: string
+  comment_sort?: 'recent' | 'top'
+  profile?: DeepScrapeProfile | null
   total_posts_found: number
   total_posts_scraped: number
   total_comments: number
