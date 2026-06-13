@@ -268,6 +268,28 @@ class InstagramScraperV16:
 
     # ── EXTRACT MEDIA ID ───────────────────────────────────────
 
+    @staticmethod
+    def _media_id_from_shortcode(shortcode: str) -> Optional[str]:
+        """
+        Decode media_id (PK) langsung dari shortcode — deterministik, tanpa
+        bergantung ke isi halaman. Instagram kadang TIDAK menyisipkan media_id
+        di <script> saat navigasi post ke-2/3 dst dalam sesi browser yang sama,
+        bikin REST/CDP gagal & komentar/likers jadi 0. Fallback ini menjamin
+        media_id selalu tersedia.
+
+        Shortcode = base64 (alfabet URL-safe IG) dari angka media PK.
+        """
+        if not shortcode or shortcode == "unknown":
+            return None
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        media_id = 0
+        for ch in shortcode:
+            idx = alphabet.find(ch)
+            if idx < 0:
+                return None  # karakter tak dikenal → biarkan path lain yang urus
+            media_id = media_id * 64 + idx
+        return str(media_id) if media_id > 0 else None
+
     def _get_media_id(self) -> Optional[str]:
         page = self._require_page()
         try:
@@ -1260,6 +1282,12 @@ class InstagramScraperV16:
                 print(Fore.CYAN + f"👤 Owner: @{owner}")
 
             media_id = self._get_media_id()
+            if not media_id:
+                # Halaman tidak menyisipkan media_id (sering terjadi pada post
+                # ke-2 dst di sesi yang sama) → hitung dari shortcode.
+                media_id = self._media_id_from_shortcode(shortcode)
+                if media_id:
+                    print(Fore.YELLOW + f"🔢 Media ID dari shortcode: {media_id}")
             if media_id:
                 result["media_id"] = media_id
                 print(Fore.GREEN + f"✅ Media ID: {media_id}")
@@ -1548,6 +1576,8 @@ class InstagramScraperV16:
                 result["owner_username"] = owner
 
             media_id = self._get_media_id()
+            if not media_id:
+                media_id = self._media_id_from_shortcode(shortcode)
             if media_id:
                 result["media_id"] = media_id
 

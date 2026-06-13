@@ -18,6 +18,20 @@ env
 session/
 data/
 
+# Chrome profile Playwright (login state lama) — JANGAN ikut ke image yang
+# di-push publik. Login dilakukan runtime via cookie (volume backend_session).
+engine/chrome_profile/
+engine/chrome_profile_playwright/
+engine/chrome_profile_search/
+
+# Output & state job runtime (dibuat ulang saat container jalan)
+engine/output/
+engine/output_tiktok/
+engine/output_tiktok_profiles/
+engine/scrape_jobs/
+engine/deep_jobs/
+engine/checkpoint_sessions/
+
 # IDE & tooling
 .vscode
 .idea

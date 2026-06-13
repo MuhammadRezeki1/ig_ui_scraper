@@ -114,6 +114,25 @@ def list_jobs() -> List[dict]:
     return jobs
 
 
+def mark_orphaned_jobs() -> int:
+    """
+    Dipanggil saat startup. Job dengan status 'pending'/'running' yang tertulis
+    di disk berarti TERTINGGAL dari proses sebelumnya (server restart / crash) —
+    thread workernya sudah mati, jadi tidak akan pernah selesai. Tandai 'error'
+    supaya frontend berhenti polling dan tidak stuck "Menunggu respons...".
+    """
+    fixed = 0
+    for st in list_jobs():
+        if st.get("status") in (JobStatus.PENDING, JobStatus.RUNNING):
+            _update_state(
+                st["job_id"],
+                status=JobStatus.ERROR,
+                error="Job terputus karena server restart. Silakan jalankan ulang.",
+            )
+            fixed += 1
+    return fixed
+
+
 def create_job(kind: str, params: dict, runner: Callable[[str, dict], dict],
                label: str = "") -> str:
     """

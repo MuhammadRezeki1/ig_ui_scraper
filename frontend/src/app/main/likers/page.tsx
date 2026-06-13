@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useSyncExternalStore, useEffect } from 'react'
+import { useState, useSyncExternalStore, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Heart, Link2, Loader2, AlertCircle, Clock,
@@ -199,7 +199,7 @@ function DownloadBtn({
 // ══════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ══════════════════════════════════════════════════════════════════
-export default function LikersPage() {
+function LikersPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -792,5 +792,14 @@ export default function LikersPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// useSearchParams() butuh Suspense boundary saat production build (Next.js).
+export default function LikersPage() {
+  return (
+    <Suspense fallback={null}>
+      <LikersPageInner />
+    </Suspense>
   )
 }

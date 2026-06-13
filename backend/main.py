@@ -45,6 +45,19 @@ app.add_middleware(
 app.include_router(checkpoint_router)
 app.include_router(deep_search_router)
 
+
+@app.on_event("startup")
+def _cleanup_orphaned_jobs():
+    """Tandai job yang nyangkut 'running' dari proses sebelumnya jadi 'error'
+    supaya frontend tidak polling selamanya setelah container restart."""
+    try:
+        n = job_manager.mark_orphaned_jobs()
+        if n:
+            print(f"[startup] {n} job tertinggal ditandai error (server restart).")
+    except Exception as e:
+        print(f"[startup] gagal cleanup job tertinggal: {e}")
+
+
 # Batas aman default — bisa di-override via env
 SAFE_MAX_COMMENTS = int(os.getenv("SAFE_MAX_COMMENTS", 2000))
 
@@ -640,75 +653,125 @@ if total_found == 0:
 # ── Phase 2: unified scrape tiap post ──
 print(f"[DeepScraper] Phase 2: Unified scrape {{total_found}} post...")
 
-with InstagramScraperV16() as scraper:
-    for idx, post_meta in enumerate(posts_feed, 1):
-        post_url = post_meta.get("url", "")
-        post_shortcode = post_meta.get("shortcode", "")
+def _looks_throttled(ud, feed_cc, feed_lc):
+    # Deteksi hasil "kosong/rusak" akibat Instagram nge-throttle request beruntun
+    # (post ke-2, ke-3, dst). Ciri-cirinya: cara ambil komentar gagal total
+    # (method kosong), atau metadata post jelas rusak (post rame tapi likes <=1),
+    # atau feed bilang ada komentar tapi hasil 0.
+    if not isinstance(ud, dict):
+        return True
+    method = (ud.get("method") or "").strip()
+    cc = ud.get("comments_count", 0) or 0
+    likes = ud.get("likes_count", 0) or 0
+    if feed_lc and feed_lc > 50 and likes <= 1:
+        return True
+    if method == "":
+        return True
+    if feed_cc and feed_cc > 0 and cc == 0:
+        return True
+    return False
 
-        if not post_url:
-            result_summary["errors"].append({{
-                "url": post_shortcode, "shortcode": post_shortcode,
-                "error": "URL kosong dari feed",
-            }})
-            continue
+for idx, post_meta in enumerate(posts_feed, 1):
+    post_url = post_meta.get("url", "")
+    post_shortcode = post_meta.get("shortcode", "")
 
-        print(f"[DeepScraper] [{{idx}}/{{total_found}}] {{post_url}}")
+    if not post_url:
+        result_summary["errors"].append({{
+            "url": post_shortcode, "shortcode": post_shortcode,
+            "error": "URL kosong dari feed",
+        }})
+        continue
 
-        post_entry = {{
-            "index": idx, "url": post_url, "shortcode": post_shortcode,
-            "taken_at": post_meta.get("taken_at", 0),
-            "taken_at_iso": post_meta.get("taken_at_iso", ""),
-            "media_type": post_meta.get("media_type", ""),
-            "feed_like_count": post_meta.get("like_count", 0),
-            "feed_comment_count": post_meta.get("comment_count", 0),
-            "feed_view_count": post_meta.get("view_count", 0),
-            "feed_caption": post_meta.get("caption", "")[:200],
-            "thumbnail_url": post_meta.get("thumbnail_url", ""),
-            "scraped": False, "error": None, "data": None,
-        }}
+    print(f"[DeepScraper] [{{idx}}/{{total_found}}] {{post_url}}")
 
+    post_entry = {{
+        "index": idx, "url": post_url, "shortcode": post_shortcode,
+        "taken_at": post_meta.get("taken_at", 0),
+        "taken_at_iso": post_meta.get("taken_at_iso", ""),
+        "media_type": post_meta.get("media_type", ""),
+        "feed_like_count": post_meta.get("like_count", 0),
+        "feed_comment_count": post_meta.get("comment_count", 0),
+        "feed_view_count": post_meta.get("view_count", 0),
+        "feed_caption": post_meta.get("caption", "")[:200],
+        "thumbnail_url": post_meta.get("thumbnail_url", ""),
+        "scraped": False, "error": None, "data": None,
+    }}
+
+    feed_cc = post_meta.get("comment_count", 0) or 0
+    feed_lc = post_meta.get("like_count", 0) or 0
+
+    unified_data = None
+    last_err = None
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
         try:
-            unified_data = scraper.scrape_post_unified(
-                post_url,
-                max_comments={max_comments},
-                include_replies={include_replies},
-                max_replies_per_comment={max_replies_per_comment},
-                scrape_likers={scrape_likers},
-                max_likers={max_likers},
-                aggressive_likers={aggressive_likers},
-                checkpoint_size=200,
-                checkpoint_delay_min=8,
-                checkpoint_delay_max=15,
-                page_delay_min=1.5,
-                page_delay_max=3.0,
-            )
-
-            cc = unified_data.get("comments_count", 0)
-            rc = unified_data.get("replies_count", 0)
-            lf = unified_data.get("likers_fetched", 0)
-
-            result_summary["total_comments"] += cc
-            result_summary["total_replies"] += rc
-            result_summary["total_likers"] += lf
-            result_summary["total_posts_scraped"] += 1
-            post_entry["scraped"] = True
-            post_entry["data"] = unified_data
-
-            print(f"[DeepScraper] [{{idx}}/{{total_found}}] OK komentar={{cc}} replies={{rc}} likers={{lf}}")
-
+            # PENTING: instance browser BARU tiap percobaan. Sesi/halaman yang
+            # dipakai ulang lintas-post bikin post ke-2 dst balik kosong
+            # (media_id/komentar/likers 0). Browser fresh = tiap post bersih
+            # seperti post pertama.
+            with InstagramScraperV16() as scraper:
+                unified_data = scraper.scrape_post_unified(
+                    post_url,
+                    max_comments={max_comments},
+                    include_replies={include_replies},
+                    max_replies_per_comment={max_replies_per_comment},
+                    scrape_likers={scrape_likers},
+                    max_likers={max_likers},
+                    aggressive_likers={aggressive_likers},
+                    checkpoint_size=200,
+                    checkpoint_delay_min=8,
+                    checkpoint_delay_max=15,
+                    page_delay_min=1.5,
+                    page_delay_max=3.0,
+                )
         except Exception as e:
-            err_msg = str(e)
-            post_entry["scraped"] = False
-            post_entry["error"] = err_msg
-            result_summary["errors"].append({{"url": post_url, "error": err_msg}})
-            print(f"[DeepScraper] [{{idx}}/{{total_found}}] FAIL {{err_msg[:120]}}")
+            last_err = str(e)
+            unified_data = None
+            print(f"[DeepScraper] [{{idx}}/{{total_found}}] attempt {{attempt}} EXCEPTION {{last_err[:120]}}")
 
-        result_summary["posts"].append(post_entry)
+        # Berhasil kalau dapat data dan TIDAK kelihatan kena throttle.
+        if unified_data is not None and not _looks_throttled(unified_data, feed_cc, feed_lc):
+            break
 
-        if idx < total_found:
-            jeda = {delay_between_posts} + random.randint(3, 8)
-            print(f"[DeepScraper] Jeda {{jeda}}s...")
-            time.sleep(jeda)
+        if attempt < max_attempts:
+            cool = random.randint(20, 40) * attempt
+            print(f"[DeepScraper] [{{idx}}/{{total_found}}] hasil kosong/throttle, "
+                  f"retry {{attempt + 1}}/{{max_attempts}} setelah {{cool}}s...")
+            time.sleep(cool)
+
+    if unified_data is not None:
+        cc = unified_data.get("comments_count", 0)
+        rc = unified_data.get("replies_count", 0)
+        lf = unified_data.get("likers_fetched", 0)
+
+        result_summary["total_comments"] += cc
+        result_summary["total_replies"] += rc
+        result_summary["total_likers"] += lf
+        result_summary["total_posts_scraped"] += 1
+        post_entry["scraped"] = True
+        post_entry["data"] = unified_data
+
+        if _looks_throttled(unified_data, feed_cc, feed_lc):
+            post_entry["warning"] = (
+                "Hasil kemungkinan kena throttle Instagram (tetap kosong "
+                f"setelah {{max_attempts}}x percobaan)."
+            )
+            print(f"[DeepScraper] [{{idx}}/{{total_found}}] MASIH KOSONG setelah {{max_attempts}}x percobaan")
+        else:
+            print(f"[DeepScraper] [{{idx}}/{{total_found}}] OK komentar={{cc}} replies={{rc}} likers={{lf}}")
+    else:
+        err_msg = last_err or "Gagal scrape post (tidak ada data dikembalikan)"
+        post_entry["scraped"] = False
+        post_entry["error"] = err_msg
+        result_summary["errors"].append({{"url": post_url, "error": err_msg}})
+        print(f"[DeepScraper] [{{idx}}/{{total_found}}] FAIL {{err_msg[:120]}}")
+
+    result_summary["posts"].append(post_entry)
+
+    if idx < total_found:
+        jeda = {delay_between_posts} + random.randint(3, 8)
+        print(f"[DeepScraper] Jeda {{jeda}}s...")
+        time.sleep(jeda)
 
 # ── Phase 3: simpan gabungan ──
 result_summary["success"] = True
@@ -1461,6 +1524,18 @@ def scrape_profile_deep(req: ScrapeProfileDeepRequest):
         raise HTTPException(
             400,
             f"Tidak bisa menentukan username dari input: '{req.username}'"
+        )
+
+    # ── Guard: Deep Scrape WAJIB login Instagram ────────────────────────────
+    # Tanpa cookie session, browser kena login-wall Instagram → job menggantung
+    # sampai timeout (bisa jam-an) dan UI stuck "Menunggu respons dari server".
+    # Tolak lebih awal dengan pesan jelas supaya user tahu harus login dulu.
+    import session_manager as sm
+    if not sm.session_exists():
+        raise HTTPException(
+            400,
+            "Belum login Instagram. Buka menu Settings → tempel cookies login "
+            "(sessionid, ds_user_id, csrftoken), lalu jalankan Deep Scrape lagi.",
         )
 
     params = req.model_dump()

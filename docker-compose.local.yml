@@ -1,0 +1,67 @@
+# ============================================================================
+# docker-compose.local.yml — untuk jalan di Docker Desktop (lokal), bukan VPS.
+#
+#   docker compose -f docker-compose.local.yml up -d --build
+#
+# Beda dengan docker-compose.yml (yang dipakai Dokploy/VPS):
+#   - Pakai network bridge lokal (bukan external dokploy-network)
+#   - Semua env sudah diisi nilai default (tidak butuh root .env)
+#   - Tambah volume backend_output supaya hasil Deep Scrape tidak hilang
+# ============================================================================
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: rezeki1/ig-scraper-backend:latest
+    container_name: ig-scraper-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ENGINE_PATH=/app/engine
+      - API_PORT=8000
+      - API_HOST=0.0.0.0
+      - GEMINI_ENABLED=False
+      - GEMINI_API_KEY=
+      - GEMINI_CONFIDENCE_THRESHOLD=0.70
+      - HEADLESS=true
+      - PROFILE_DIR=chrome_profile_playwright
+    volumes:
+      - backend_data:/app/data           # data tracker / snapshot
+      - backend_session:/app/session     # cookie login IG (persist antar restart)
+      - backend_output:/app/engine/output # hasil scrape & deep scrape
+    restart: unless-stopped
+    networks:
+      - ig-scraper-net
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: rezeki1/ig-scraper-frontend:latest
+    container_name: ig-scraper-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      # Browser (sisi klien) akses backend lewat port host yang di-expose:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      # Next.js server-side (di dalam container) akses backend lewat nama service:
+      - INTERNAL_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - ig-scraper-net
+
+networks:
+  ig-scraper-net:
+    driver: bridge
+
+volumes:
+  backend_data:
+  backend_session:
+  backend_output:
