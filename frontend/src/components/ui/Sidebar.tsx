@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Search, Users, BarChart2, FileJson,
-  Settings, Wifi, WifiOff, ChevronRight, Hash, Layers, PanelLeftClose,
+  Settings, Wifi, WifiOff, ChevronRight, Hash, Layers, X,
 } from 'lucide-react'
 import { IGLogoFilled } from '@/components/ui/IGLogo'
 import { clsx } from 'clsx'
@@ -22,7 +22,13 @@ const NAV = [
   { href: '/main/settings',     label: 'Settings',      icon: Settings },
 ]
 
-export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+export function Sidebar({
+  collapsed, mobileOpen, onCloseMobile,
+}: {
+  collapsed: boolean
+  mobileOpen: boolean
+  onCloseMobile: () => void
+}) {
   const pathname = usePathname()
   const [engineOk, setEngineOk]       = useState(false)
   const [sessionUser, setSessionUser] = useState<string | null>(null)
@@ -51,17 +57,20 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
   return (
     <aside
       className={clsx(
-        'fixed left-0 top-0 h-full w-64 flex flex-col z-50 transition-transform duration-300',
-        open ? 'translate-x-0' : '-translate-x-full',
+        'fixed left-0 top-0 h-full w-[270px] lg:w-64 flex flex-col z-50',
+        'transition-transform duration-300 ease-in-out',
+        // Mobile: drawer mengikuti mobileOpen. Desktop: mengikuti collapsed.
+        mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full',
+        collapsed ? 'lg:-translate-x-full' : 'lg:translate-x-0 lg:shadow-none',
       )}
     >
       <div className="absolute inset-0 glass border-r border-white/[0.07]" />
 
       <div className="relative flex flex-col h-full px-4 py-6">
 
-        {/* ── Logo + tombol sembunyikan ── */}
-        <div className="flex items-center justify-between mb-8 px-2 gap-2">
-          <Link href="/main/dashboard" className="flex items-center gap-3 min-w-0">
+        {/* ── Logo + close (mobile) ── */}
+        <div className="flex items-center justify-between mb-8 px-1 gap-2 h-10">
+          <Link href="/main/dashboard" className="flex items-center gap-3 min-w-0" onClick={onCloseMobile}>
             <IGLogoFilled size={40} />
             <div className="min-w-0">
               <p
@@ -73,13 +82,13 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
               <p className="text-[11px] text-white/40 mt-0.5">Analytics Dashboard</p>
             </div>
           </Link>
+          {/* Close — hanya mobile */}
           <button
-            onClick={onToggle}
-            title="Sembunyikan sidebar"
-            aria-label="Sembunyikan sidebar"
-            className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+            onClick={onCloseMobile}
+            aria-label="Tutup menu"
+            className="lg:hidden p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors shrink-0"
           >
-            <PanelLeftClose size={18} />
+            <X size={18} />
           </button>
         </div>
 
@@ -119,6 +128,7 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
               <Link
                 key={href}
                 href={href}
+                onClick={onCloseMobile}
                 className={clsx(
                   'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative',
                   active
@@ -165,20 +175,14 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
 
                 {/* Badge "NEW" untuk Search & Deep Scrape (hanya kalau tidak active) */}
                 {isSearch && !active && (
-                  <span
-                    className="text-[9px] font-bold px-1.5 py-0.5 rounded-full
-                               bg-pink-500/20 border border-pink-500/30 text-pink-300
-                               tracking-wide"
-                  >
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full tracking-wide
+                                   bg-pink-500/20 border border-pink-500/30 text-pink-300">
                     NEW
                   </span>
                 )}
                 {isDeepScrape && !active && (
-                  <span
-                    className="text-[9px] font-bold px-1.5 py-0.5 rounded-full
-                               bg-purple-500/20 border border-purple-500/30 text-purple-300
-                               tracking-wide"
-                  >
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full tracking-wide
+                                   bg-purple-500/20 border border-purple-500/30 text-purple-300">
                     NEW
                   </span>
                 )}
