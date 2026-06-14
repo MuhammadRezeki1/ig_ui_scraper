@@ -3,11 +3,12 @@
 import { useState } from 'react'
 import {
   Layers, Loader2, ChevronDown, ChevronUp, Clock, AlertCircle,
-  Download, Heart, MessageCircle, Users, BadgeCheck, Trophy, Search,
+  Download, Heart, MessageCircle, BadgeCheck, Trophy, Search,
 } from 'lucide-react'
 import { scrapeProfileDeep, getDeepScrapeProgress, getDeepScrapeResult } from '@/lib/api'
 import { scrapeStore, useScrapeTask } from '@/lib/scrapeStore'
 import type { DeepScrapeResult, DeepScrapePostData } from '@/types'
+import { FollowAnalysisSection } from './FollowAnalysisSection'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -453,6 +454,9 @@ export function ProfileDeepScrapePanel({ initialUsername = '', locked = false }:
               {result.errors.length} error saat scraping (lihat JSON untuk detail).
             </div>
           )}
+
+          {/* Analisis followers & following untuk profil yang sama */}
+          <FollowAnalysisSection username={result.username} />
         </div>
       )}
     </div>

@@ -12,6 +12,13 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# NEXT_PUBLIC_* harus tersedia saat BUILD — Next.js meng-inline-nya ke bundle
+# browser. Set lewat build arg (lihat docker-compose.yml → build.args).
+# Default localhost:8000 cocok untuk jalan lokal; untuk server isi dengan
+# URL publik backend (mis. https://api.domainmu.com).
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 # Build Next.js (hasil: .next/standalone)
 RUN npm run build
 

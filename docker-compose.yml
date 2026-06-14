@@ -1,53 +1,90 @@
+# ============================================================================
+# docker-compose.yml — build + push image ke Docker Hub (rezeki1/*) lalu deploy.
+#
+# Build & push (dari mesin lokal):
+#   docker login
+#   docker compose build
+#   docker compose push
+#
+# Deploy di server (pakai image yang sudah di-push, tanpa build ulang):
+#   docker compose pull
+#   docker compose up -d
+#
+# Semua nilai env punya default aman di bawah (lewat ${VAR:-default}), jadi
+# tetap jalan walau root .env belum diisi. Override lewat .env / Dokploy UI.
+# Catatan: NEXT_PUBLIC_API_URL di-bake saat BUILD (lihat build.args frontend).
+# ============================================================================
 services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     image: rezeki1/ig-scraper-backend:latest
+    platform: linux/amd64
     container_name: ig-scraper-backend
     expose:
       - "8000"
     environment:
-      - FLASK_API_BASE=${FLASK_API_BASE}
-      - ENGINE_PATH=${ENGINE_PATH}
-      - API_PORT=${API_PORT}
-      - API_HOST=${API_HOST}
-      - GEMINI_ENABLED=${GEMINI_ENABLED}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GEMINI_CONFIDENCE_THRESHOLD=${GEMINI_CONFIDENCE_THRESHOLD}
-      - HEADLESS=${HEADLESS}
-      - PROFILE_DIR=${PROFILE_DIR}
-      - CORS_ORIGINS=${CORS_ORIGINS}
-      - HTTP_PROXY=${HTTP_PROXY}
-      - HTTPS_PROXY=${HTTPS_PROXY}
-      - ALL_PROXY=${ALL_PROXY}
-      - NO_PROXY=${NO_PROXY}
+      - ENGINE_PATH=${ENGINE_PATH:-/app/engine}
+      - API_PORT=${API_PORT:-8000}
+      - API_HOST=${API_HOST:-0.0.0.0}
+      - GEMINI_ENABLED=${GEMINI_ENABLED:-False}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_CONFIDENCE_THRESHOLD=${GEMINI_CONFIDENCE_THRESHOLD:-0.70}
+      - HEADLESS=${HEADLESS:-true}
+      - PROFILE_DIR=${PROFILE_DIR:-chrome_profile_playwright}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - ALL_PROXY=${ALL_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
     volumes:
-      - backend_data:/app/data
-      - backend_session:/app/session
+      - backend_data:/app/data            # data tracker / snapshot
+      - backend_session:/app/session      # cookie login IG (persist antar restart)
+      - backend_output:/app/engine/output # hasil scrape & deep scrape
     restart: unless-stopped
     networks:
       - dokploy-network
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.getenv(\"API_PORT\", \"8000\")}/api/health')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Di-inline ke bundle browser saat build. Untuk server isi dengan URL
+        # publik backend (mis. https://api.domainmu.com).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     image: rezeki1/ig-scraper-frontend:latest
+    platform: linux/amd64
     container_name: ig-scraper-frontend
     expose:
       - "3000"
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-      - INTERNAL_API_URL=${INTERNAL_API_URL}
-      - HTTP_PROXY=${HTTP_PROXY}
-      - HTTPS_PROXY=${HTTPS_PROXY}
-      - ALL_PROXY=${ALL_PROXY}
-      - NO_PROXY=${NO_PROXY}
+      # Next.js server-side (di dalam container) akses backend lewat nama service:
+      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://backend:8000}
+      # Browser pakai nilai yang sudah di-bake saat build (build arg di atas);
+      # baris ini hanya untuk konsistensi runtime SSR.
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - ALL_PROXY=${ALL_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
     depends_on:
       - backend
     restart: unless-stopped
@@ -64,3 +101,4 @@ networks:
 volumes:
   backend_data:
   backend_session:
+  backend_output:
