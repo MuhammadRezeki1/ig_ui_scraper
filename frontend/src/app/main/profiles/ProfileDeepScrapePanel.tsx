@@ -36,7 +36,7 @@ function Toggle({ checked, onChange, disabled }: {
         checked ? 'bg-pink-500' : 'bg-white/15'
       }`}
     >
-      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-[#fff] shadow-sm transition-transform ${
         checked ? 'translate-x-5' : ''
       }`} />
     </button>

@@ -123,7 +123,7 @@ function UnlimitedToggle({ checked, onChange, disabled }: UnlimitedToggleProps) 
             disabled={disabled} className="sr-only peer"
           />
           <div className={`w-11 h-6 rounded-full transition-colors ${checked ? 'bg-orange-500/70' : 'bg-white/10'}`} />
-          <div className="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+          <div className="absolute top-1 left-1 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
         </div>
       </label>
 
@@ -247,7 +247,7 @@ function Toggle({
         <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}
           disabled={disabled} className="sr-only peer" />
         <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-pink-500/70 transition-colors" />
-        <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+        <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
       </div>
       <div>
         <div className="flex items-center gap-1.5 text-sm text-white/70 group-hover:text-white/90 transition-colors">
@@ -684,7 +684,7 @@ function PostResultView({ result, mode }: { result: PostResult | UnifiedResult; 
             )}
             {result.media_type === 'VIDEO' && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                <Play size={18} className="text-white/80" fill="white" />
+                <Play size={18} className="text-[#ffffffcc]" fill="white" />
               </div>
             )}
           </div>
@@ -859,7 +859,7 @@ function BatchResultItem({ item, idx, openIdx, setOpenIdx }: {
           )}
           {d.media_type === 'VIDEO' && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-              <Play size={14} className="text-white/80" fill="white" />
+              <Play size={14} className="text-[#ffffffcc]" fill="white" />
             </div>
           )}
         </div>

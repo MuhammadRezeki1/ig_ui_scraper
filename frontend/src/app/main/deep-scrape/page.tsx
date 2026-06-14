@@ -189,7 +189,7 @@ function PostEntryCard({ entry }: { entry: DeepScrapePostEntry }) {
           )}
           {entry.media_type === 'VIDEO' && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-              <Play size={14} className="text-white/80" fill="white" />
+              <Play size={14} className="text-[#ffffffcc]" fill="white" />
             </div>
           )}
         </div>
@@ -519,7 +519,7 @@ export default function DeepScrapePage() {
                   className="sr-only peer"
                 />
                 <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-orange-500/70 transition-colors" />
-                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
               </div>
               <div className="flex items-center gap-2 text-sm text-white/70">
                 <Infinity size={13} className="text-orange-400" />
@@ -578,7 +578,7 @@ export default function DeepScrapePage() {
                   className="sr-only peer"
                 />
                 <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-orange-500/70 transition-colors" />
-                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
               </div>
               <div className="flex items-center gap-2 text-sm text-white/70">
                 <Infinity size={13} className="text-orange-400" />
@@ -628,7 +628,7 @@ export default function DeepScrapePage() {
                   className="sr-only peer"
                 />
                 <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-pink-500/70 transition-colors" />
-                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
               </div>
               <span className="text-sm text-white/70">Sertakan balasan</span>
             </label>
@@ -651,7 +651,7 @@ export default function DeepScrapePage() {
                   className="sr-only peer"
                 />
                 <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-pink-500/70 transition-colors" />
-                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
               </div>
               <span className="text-sm text-white/70">Scrape Likers</span>
             </label>
@@ -681,7 +681,7 @@ export default function DeepScrapePage() {
                       className="sr-only peer"
                     />
                     <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-yellow-500/70 transition-colors" />
-                    <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+                    <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
                   </div>
                   <div className="flex items-center gap-2 text-sm text-white/70">
                     <Zap size={13} className="text-yellow-400" />

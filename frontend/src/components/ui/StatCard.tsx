@@ -20,7 +20,7 @@ const colorMap = {
   green:   { bg: 'rgba(34,197,94,0.12)',  border: 'rgba(34,197,94,0.2)',  text: '#22c55e', glow: 'rgba(34,197,94,0.3)' },
   yellow:  { bg: 'rgba(252,175,69,0.12)', border: 'rgba(252,175,69,0.2)', text: '#FCAF45', glow: 'rgba(252,175,69,0.3)' },
   red:     { bg: 'rgba(220,38,38,0.12)',  border: 'rgba(220,38,38,0.2)',  text: '#dc2626', glow: 'rgba(220,38,38,0.3)' },
-  default: { bg: 'rgba(255,255,255,0.04)',border: 'rgba(255,255,255,0.08)',text: 'rgba(255,255,255,0.9)', glow: 'transparent' },
+  default: { bg: 'rgba(24,24,30,0.03)', border: 'rgba(24,24,30,0.08)', text: 'rgba(24,24,30,0.9)', glow: 'transparent' },
 }
 
 export function StatCard({ label, value, sub, icon, color = 'default', percentage, loading }: StatCardProps) {

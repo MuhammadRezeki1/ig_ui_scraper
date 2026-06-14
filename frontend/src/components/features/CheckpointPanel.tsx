@@ -504,7 +504,7 @@ function NewSessionForm({
             className="sr-only peer"
           />
           <div className="w-9 h-5 rounded-full bg-white/10 peer-checked:bg-purple-500/70 transition-colors" />
-          <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+          <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-4" />
         </div>
         <span className="text-xs text-white/60">Sertakan balasan</span>
       </label>

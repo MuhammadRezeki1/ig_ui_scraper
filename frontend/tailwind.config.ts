@@ -18,8 +18,8 @@ const config: Config = {
         },
       },
       backgroundImage: {
-        'ig-gradient': 'linear-gradient(135deg, #405DE6, #5851DB, #833AB4, #C13584, #E1306C, #FD1D1D, #F56040, #F77737, #FCAF45)',
-        'ig-gradient-soft': 'linear-gradient(135deg, #405DE620, #833AB420, #E1306C20)',
+        'ig-gradient': 'linear-gradient(135deg, #C13584, #C13584)',
+        'ig-gradient-soft': 'linear-gradient(135deg, #C1358418, #C1358410)',
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4,0,0.6,1) infinite',

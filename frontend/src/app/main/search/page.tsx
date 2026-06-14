@@ -80,7 +80,7 @@ function Toggle({
         <input type="checkbox" checked={checked} disabled={disabled}
           onChange={e => onChange(e.target.checked)} className="sr-only peer" />
         <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-pink-500/70 transition-colors" />
-        <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
+        <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
       </div>
       <span className="text-sm text-white/70">{label}</span>
     </label>
@@ -160,8 +160,8 @@ function PostCard({ post, onScrape, onLikers }: {
         <div className={`absolute inset-0 bg-black/60 flex flex-col items-center justify-center
                          gap-2 transition-opacity duration-200 ${hovered ? 'opacity-100' : 'opacity-0'}`}>
           <a href={post.url} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 rounded-lg text-xs
-                       text-white hover:bg-white/20 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ffffff24] rounded-lg text-xs
+                       text-[#fff] hover:bg-[#ffffff3d] transition-colors"
             onClick={e => e.stopPropagation()}>
             <ExternalLink className="w-3 h-3" /> Buka Post
           </a>
@@ -177,7 +177,7 @@ function PostCard({ post, onScrape, onLikers }: {
           </button>
         </div>
         <div className="absolute top-2 left-2 flex gap-1">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/50 text-[10px] text-white/60">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/50 text-[10px] text-[#ffffffb3]">
             {mediaIcon(post.media_type)}
           </span>
           {post.source === 'top' && (
@@ -189,7 +189,7 @@ function PostCard({ post, onScrape, onLikers }: {
         </div>
         <div className="absolute top-2 right-2">
           <span className="w-5 h-5 flex items-center justify-center rounded-full bg-black/50
-                           text-[10px] font-bold text-white/50">{post.rank}</span>
+                           text-[10px] font-bold text-[#ffffff99]">{post.rank}</span>
         </div>
         {post.hashtag && (
           <div className="absolute bottom-2 left-2">
@@ -513,7 +513,7 @@ export default function SearchPage() {
 
   // ─────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white">
+    <div className="min-h-screen bg-transparent">
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         <div className="absolute top-[-20%] left-[-10%] w-[60vw] h-[60vw] rounded-full bg-pink-600/5 blur-[120px]" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-purple-600/5 blur-[120px]" />

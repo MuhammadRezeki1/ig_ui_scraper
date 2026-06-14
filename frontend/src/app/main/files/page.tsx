@@ -496,7 +496,7 @@ function DeepScrapePreview({ data }: { data: AnyResult }) {
                       )}
                       {post.media_type === 'VIDEO' && (
                         <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                          <Play size={10} className="text-white/80" fill="white" />
+                          <Play size={10} className="text-[#ffffffcc]" fill="white" />
                         </div>
                       )}
                     </div>
@@ -843,7 +843,7 @@ export default function FilesPage() {
                         )}
                         {d.media_type === 'VIDEO' && (
                           <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                            <Play size={12} className="text-white/80" fill="white" />
+                            <Play size={12} className="text-[#ffffffcc]" fill="white" />
                           </div>
                         )}
                       </div>
@@ -1094,7 +1094,7 @@ export default function FilesPage() {
                           )}
                           {(post.is_video || post.media_type === 'VIDEO') && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
-                              <Play size={12} className="text-white/80" fill="white" />
+                              <Play size={12} className="text-[#ffffffcc]" fill="white" />
                             </div>
                           )}
                         </div>
@@ -1132,7 +1132,7 @@ export default function FilesPage() {
                       )}
                       {selected.media_type === 'VIDEO' && (
                         <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                          <Play size={14} className="text-white/80" fill="white" />
+                          <Play size={14} className="text-[#ffffffcc]" fill="white" />
                         </div>
                       )}
                     </div>

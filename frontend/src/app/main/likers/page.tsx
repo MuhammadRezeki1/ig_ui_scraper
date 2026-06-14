@@ -343,7 +343,7 @@ function LikersContent() {
         <div className="relative">
           <IGLogoFilled size={36} />
           <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-pink-500 rounded-full flex items-center justify-center">
-            <Heart size={9} className="text-white fill-white" />
+            <Heart size={9} className="text-[#fff] fill-[#fff]" />
           </div>
         </div>
         <div>
@@ -709,7 +709,7 @@ function LikersContent() {
                       className="sr-only peer"
                     />
                     <div className="w-8 h-4 rounded-full bg-white/10 peer-checked:bg-blue-500/60 transition-colors" />
-                    <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+                    <div className="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-4" />
                   </div>
                   <BadgeCheck size={13} className="text-blue-400" />
                   <span className="text-xs text-white/60">Verified only ({verifiedCount})</span>
