@@ -470,7 +470,7 @@ function LikersPreview({ likers, fetched, total }: { likers: UnifiedResult['like
           <a key={l.user_id || i} href={`https://www.instagram.com/${l.username}/`}
             target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-2.5 glass rounded-xl px-3 py-2 hover:bg-white/5 transition-colors group">
-            <div className="w-7 h-7 rounded-full bg-linear-to-br from-pink-500/30 to-purple-500/30 flex items-center justify-center shrink-0 text-xs font-bold text-white/60">
+            <div className="w-7 h-7 rounded-full glass flex items-center justify-center shrink-0 text-xs font-bold text-white/60">
               {l.username?.[0]?.toUpperCase() || '?'}
             </div>
             <div className="flex-1 min-w-0">
@@ -566,7 +566,7 @@ function ActiveCommentersPanel({ commenters, filenameHint }: {
               <button onClick={() => setOpenUser(isOpen ? null : u.username)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/5 transition-colors text-left">
                 <span className="text-sm font-bold text-white/20 w-6 shrink-0 text-center">#{i + 1}</span>
-                <div className="w-8 h-8 rounded-full bg-linear-to-br from-purple-500/30 to-pink-500/30 flex items-center justify-center shrink-0 text-xs font-bold text-white/70">
+                <div className="w-8 h-8 rounded-full glass flex items-center justify-center shrink-0 text-xs font-bold text-white/70">
                   {u.username?.[0]?.toUpperCase() || '?'}
                 </div>
                 <div className="flex-1 min-w-0">

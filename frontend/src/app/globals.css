@@ -49,6 +49,23 @@
   /* Accent used wherever a "gradient" was referenced — now a flat base color */
   --ig-grad: linear-gradient(135deg, var(--accent), var(--accent));
   --ig-grad-soft: var(--accent-soft);
+  
+  /* ============================================================
+     REMAP pink-500 to accent for soft white theme
+     All bg-pink-500, text-pink-500, border-pink-500 etc are
+     toned down to subtle accent hints rather than bright IG pink.
+     ============================================================ */
+  --pink-50:   rgba(193, 53, 132, 0.03);
+  --pink-100:  rgba(193, 53, 132, 0.06);
+  --pink-200:  rgba(193, 53, 132, 0.12);
+  --pink-300:  #C13584;
+  --pink-400:  #C13584;
+  --pink-500:  #C13584;
+  --pink-600:  #A92D74;
+  --pink-700:  #8A2360;
+  --pink-800:  #6C1B4C;
+  --pink-900:  #4E1336;
+  --pink-950:  #300B20;
 
   --font-display: 'Syne', system-ui;
   --font-body: 'DM Sans', system-ui;

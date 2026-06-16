@@ -27,12 +27,8 @@ export default function DashboardPage() {
   return (
     <div className="p-8 max-w-6xl">
       {/* Hero */}
-      <div className="glass-strong rounded-3xl p-8 mb-8 relative overflow-hidden">
-        <div className="absolute inset-0 opacity-10" style={{ background: 'var(--ig-grad)' }} />
-        <div className="absolute -right-12 -top-12 w-64 h-64 rounded-full blur-3xl opacity-20"
-          style={{ background: 'radial-gradient(circle, #E1306C, #833AB4)' }} />
-
-        <div className="relative flex items-center justify-between">
+      <div className="glass-card rounded-3xl p-8 mb-8">
+        <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-3 mb-3">
               <IGLogoFilled size={48} />
@@ -40,10 +36,10 @@ export default function DashboardPage() {
                 <h1 className="text-3xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>
                   <span className="ig-text">IG Scraper</span>
                 </h1>
-                <p className="text-white/50 text-sm">Instagram Analytics & Sentiment Dashboard</p>
+                <p className="text-sm text-white/50">Instagram Analytics & Sentiment Dashboard</p>
               </div>
             </div>
-            <p className="text-white/60 text-sm max-w-lg mt-4">
+            <p className="text-sm text-white/50 max-w-lg mt-4">
               Scrape komentar Instagram, analisis sentimen dengan IndoBERT, track engagement metrics — semuanya dalam satu dashboard.
             </p>
             <div className="flex gap-3 mt-6">
@@ -60,7 +56,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="hidden lg:block">
-            <IGLogoFilled size={120} className="opacity-20" />
+            <IGLogoFilled size={120} className="opacity-10" />
           </div>
         </div>
       </div>

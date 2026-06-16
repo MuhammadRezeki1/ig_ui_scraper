@@ -125,11 +125,7 @@ export function Sidebar() {
                     'shrink-0 transition-colors',
                     active
                       ? 'text-white'
-                      : isSearch
-                        ? 'text-pink-400/70 group-hover:text-pink-300'
-                        : isDeepScrape
-                          ? 'text-purple-400/70 group-hover:text-purple-300'
-                          : 'text-white/40 group-hover:text-white/70',
+                      : 'text-white/40 group-hover:text-white/70',
                   )}
                 />
 
@@ -138,11 +134,7 @@ export function Sidebar() {
                     'text-sm font-medium flex-1',
                     active
                       ? 'text-white'
-                      : isSearch
-                        ? 'text-pink-300/80 group-hover:text-pink-200'
-                        : isDeepScrape
-                          ? 'text-purple-300/80 group-hover:text-purple-200'
-                          : 'text-white/50 group-hover:text-white/80',
+                      : 'text-white/50 group-hover:text-white/80',
                   )}
                 >
                   {label}

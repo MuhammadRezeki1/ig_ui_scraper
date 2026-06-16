@@ -784,11 +784,11 @@ export default function DeepScrapePage() {
                   </div>
                   <div className="progress-bar">
                     <div
-                      className="progress-fill"
-                      style={{
-                        width: `${((progress.total_posts_scraped ?? 0) / (progress.total_posts_found || 1)) * 100}%`,
-                        background: 'linear-gradient(90deg, #a855f7, #ec4899)',
-                      }}
+                    className="progress-fill"
+                    style={{
+                      width: `${((progress.total_posts_scraped ?? 0) / (progress.total_posts_found || 1)) * 100}%`,
+                      background: 'var(--accent)',
+                    }}
                     />
                   </div>
                 </div>

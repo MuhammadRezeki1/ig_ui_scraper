@@ -28,8 +28,6 @@ import { scrapeStore, useScrapeTask, useScrapeBusy } from '@/lib/scrapeStore'
 // ── Constants ────────────────────────────────────────────────────
 const SCRAPE_ROUTE = '/main/scrapes'
 const LIKERS_ROUTE = '/main/likers'
-// Keyword & hashtag = 2 fitur terpisah, masing-masing punya output yang
-// dipersist sendiri lintas-navigasi.
 const SEARCH_KEY_HASHTAG = 'search:hashtag'
 const SEARCH_KEY_KEYWORD = 'search:keyword'
 
@@ -39,8 +37,6 @@ type SearchMode = 'keyword' | 'hashtag'
 type SortBy     = 'top' | 'likes' | 'comments' | 'recent'
 type ViewMode   = 'grid' | 'list'
 
-// Mode terakhir (keyword/hashtag) disimpan di module agar bertahan saat
-// pindah halaman lalu kembali.
 let lastSearchMode: SearchMode = 'hashtag'
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -60,18 +56,13 @@ function timeAgo(ts?: number): string {
 }
 
 function mediaIcon(type?: string) {
-  if (type === 'VIDEO')    return <Film      className="w-3 h-3" />
-  if (type === 'CAROUSEL') return <Layers    className="w-3 h-3" />
-  return                          <ImageIcon className="w-3 h-3" />
+  if (type === 'VIDEO')    return <Film className="w-3 h-3" />
+  if (type === 'CAROUSEL') return <Layers className="w-3 h-3" />
+  return                    <ImageIcon className="w-3 h-3" />
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Reusable sub-components
-// ─────────────────────────────────────────────────────────────────
-
-function Toggle({
-  checked, onChange, label, disabled,
-}: {
+// ── Toggle ───────────────────────────────────────────────────────
+function Toggle({ checked, onChange, label, disabled }: {
   checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean
 }) {
   return (
@@ -79,32 +70,30 @@ function Toggle({
       <div className="relative shrink-0">
         <input type="checkbox" checked={checked} disabled={disabled}
           onChange={e => onChange(e.target.checked)} className="sr-only peer" />
-        <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-pink-500/70 transition-colors" />
-        <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[#fff] shadow transition-transform peer-checked:translate-x-5" />
+        <div className="w-10 h-5 rounded-full bg-white/10 peer-checked:bg-white/20 transition-colors" />
+        <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
       </div>
-      <span className="text-sm text-white/70">{label}</span>
+      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{label}</span>
     </label>
   )
 }
 
 function Spinner({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
   const cls = size === 'sm' ? 'w-4 h-4' : size === 'lg' ? 'w-8 h-8' : 'w-5 h-5'
-  return <Loader2 className={`${cls} animate-spin text-pink-400`} />
+  return <Loader2 className={`${cls} animate-spin`} style={{ color: 'var(--text-muted)' }} />
 }
 
-function NumberInput({
-  label, value, onChange, min, max,
-}: {
+function NumberInput({ label, value, onChange, min, max }: {
   label: string; value: number; onChange: (v: number) => void; min?: number; max?: number
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs text-white/50 font-medium tracking-wide uppercase">{label}</label>
+      <label className="text-xs font-medium tracking-wide uppercase" style={{ color: 'var(--text-secondary)' }}>{label}</label>
       <input
         type="number" value={value} min={min} max={max}
         onChange={e => onChange(Number(e.target.value))}
         className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white
-                   focus:outline-none focus:border-pink-500/50 focus:bg-white/8 transition-all
+                   focus:outline-none focus:border-white/30 focus:bg-white/8 transition-all
                    [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none
                    [&::-webkit-inner-spin-button]:appearance-none"
       />
@@ -112,9 +101,7 @@ function NumberInput({
   )
 }
 
-function HashtagBadge({
-  tag, count, active, onClick,
-}: {
+function HashtagBadge({ tag, count, active, onClick }: {
   tag: string; count?: number; active?: boolean; onClick?: () => void
 }) {
   return (
@@ -122,8 +109,8 @@ function HashtagBadge({
       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
                   transition-all border
                   ${active
-                    ? 'bg-pink-500/20 border-pink-500/50 text-pink-300'
-                    : 'bg-white/5 border-white/10 text-white/60 hover:border-pink-500/30 hover:text-white/80'
+                    ? 'bg-white/10 border-white/20 text-white'
+                    : 'bg-white/5 border-white/10 text-white/60 hover:border-white/20 hover:text-white/80'
                   }`}
     >
       <Hash className="w-3 h-3" />
@@ -133,7 +120,7 @@ function HashtagBadge({
   )
 }
 
-// ── PostCard (grid) ───────────────────────────────────────────────
+// ── PostCard (grid) ──────────────────────────────────────────────
 function PostCard({ post, onScrape, onLikers }: {
   post: SearchPostItem; onScrape: (url: string) => void; onLikers: (url: string) => void
 }) {
@@ -142,8 +129,8 @@ function PostCard({ post, onScrape, onLikers }: {
   return (
     <div
       className="group relative rounded-xl overflow-hidden border border-white/8 bg-white/3
-                 hover:border-pink-500/30 transition-all duration-300 hover:shadow-lg
-                 hover:shadow-pink-500/10 hover:-translate-y-0.5"
+                 hover:border-white/15 transition-all duration-300 hover:shadow-lg
+                 hover:shadow-black/5 hover:-translate-y-0.5"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -154,30 +141,30 @@ function PostCard({ post, onScrape, onLikers }: {
             loading="lazy" />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <ImageIcon className="w-8 h-8 text-white/20" />
+            <ImageIcon className="w-8 h-8" style={{ color: 'var(--text-muted)' }} />
           </div>
         )}
         <div className={`absolute inset-0 bg-black/60 flex flex-col items-center justify-center
                          gap-2 transition-opacity duration-200 ${hovered ? 'opacity-100' : 'opacity-0'}`}>
           <a href={post.url} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ffffff24] rounded-lg text-xs
-                       text-[#fff] hover:bg-[#ffffff3d] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 rounded-lg text-xs
+                       text-white hover:bg-white/30 transition-colors"
             onClick={e => e.stopPropagation()}>
             <ExternalLink className="w-3 h-3" /> Buka Post
           </a>
           <button onClick={() => onScrape(post.url)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-pink-500/20 border border-pink-500/30
-                       rounded-lg text-xs text-pink-300 hover:bg-pink-500/30 transition-colors">
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/15 border border-white/20
+                       rounded-lg text-xs text-white hover:bg-white/25 transition-colors">
             <MessageCircle className="w-3 h-3" /> Scrape Komentar
           </button>
           <button onClick={() => onLikers(post.url)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/20 border border-purple-500/30
-                       rounded-lg text-xs text-purple-300 hover:bg-purple-500/30 transition-colors">
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 border border-white/15
+                       rounded-lg text-xs text-white/80 hover:bg-white/20 transition-colors">
             <Heart className="w-3 h-3" /> Scrape Likers
           </button>
         </div>
         <div className="absolute top-2 left-2 flex gap-1">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/50 text-[10px] text-[#ffffffb3]">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/50 text-[10px] text-white/70">
             {mediaIcon(post.media_type)}
           </span>
           {post.source === 'top' && (
@@ -189,12 +176,12 @@ function PostCard({ post, onScrape, onLikers }: {
         </div>
         <div className="absolute top-2 right-2">
           <span className="w-5 h-5 flex items-center justify-center rounded-full bg-black/50
-                           text-[10px] font-bold text-[#ffffff99]">{post.rank}</span>
+                           text-[10px] font-bold text-white/60">{post.rank}</span>
         </div>
         {post.hashtag && (
           <div className="absolute bottom-2 left-2">
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-pink-500/20
-                             border border-pink-500/20 text-[10px] text-pink-300">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/10
+                             border border-white/15 text-[10px] text-white/70">
               <Hash className="w-2.5 h-2.5" />{post.hashtag}
             </span>
           </div>
@@ -210,8 +197,8 @@ function PostCard({ post, onScrape, onLikers }: {
         )}
         <div className="flex items-center justify-between pt-0.5">
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1 text-[11px] text-pink-400/80">
-              <Heart className="w-3 h-3" /> {formatNum(post.like_count)}
+            <span className="flex items-center gap-1 text-[11px] text-white/50">
+              <Heart className="w-3 h-3" style={{ color: 'var(--text-muted)' }} /> {formatNum(post.like_count)}
             </span>
             <span className="flex items-center gap-1 text-[11px] text-white/40">
               <MessageCircle className="w-3 h-3" /> {formatNum(post.comment_count)}
@@ -231,19 +218,19 @@ function PostCard({ post, onScrape, onLikers }: {
   )
 }
 
-// ── PostRow (list) ────────────────────────────────────────────────
+// ── PostRow (list) ───────────────────────────────────────────────
 function PostRow({ post, onScrape, onLikers }: {
   post: SearchPostItem; onScrape: (url: string) => void; onLikers: (url: string) => void
 }) {
   return (
     <div className="flex items-center gap-4 px-4 py-3 rounded-xl border border-white/8 bg-white/3
-                    hover:border-pink-500/20 hover:bg-white/5 transition-all group">
+                    hover:border-white/15 hover:bg-white/5 transition-all group">
       <span className="w-6 text-center text-xs font-bold text-white/30 shrink-0">{post.rank}</span>
       <div className="w-12 h-12 rounded-lg overflow-hidden bg-white/5 shrink-0">
         {post.thumbnail_url
           ? <img src={post.thumbnail_url} alt="" className="w-full h-full object-cover" loading="lazy" />
           : <div className="w-full h-full flex items-center justify-center">
-              <ImageIcon className="w-4 h-4 text-white/20" />
+              <ImageIcon className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             </div>
         }
       </div>
@@ -259,15 +246,15 @@ function PostRow({ post, onScrape, onLikers }: {
             </span>
           )}
           {post.hashtag && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-pink-500/15
-                             text-[10px] text-pink-300">#{post.hashtag}</span>
+            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-white/10
+                             text-[10px] text-white/60">#{post.hashtag}</span>
           )}
         </div>
         <p className="text-xs text-white/35 truncate">{post.caption || '(tanpa caption)'}</p>
       </div>
       <div className="flex items-center gap-4 shrink-0">
-        <span className="flex items-center gap-1 text-xs text-pink-400/70">
-          <Heart className="w-3.5 h-3.5" />{formatNum(post.like_count)}
+        <span className="flex items-center gap-1 text-xs text-white/50">
+          <Heart className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />{formatNum(post.like_count)}
         </span>
         <span className="flex items-center gap-1 text-xs text-white/40">
           <MessageCircle className="w-3.5 h-3.5" />{formatNum(post.comment_count)}
@@ -286,10 +273,10 @@ function PostRow({ post, onScrape, onLikers }: {
           className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-colors"
           title="Buka di Instagram"><ExternalLink className="w-3.5 h-3.5" /></a>
         <button onClick={() => onScrape(post.url)}
-          className="p-1.5 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 transition-colors"
+          className="p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white/60 transition-colors"
           title="Scrape komentar"><MessageCircle className="w-3.5 h-3.5" /></button>
         <button onClick={() => onLikers(post.url)}
-          className="p-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 transition-colors"
+          className="p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white/60 transition-colors"
           title="Scrape likers"><Heart className="w-3.5 h-3.5" /></button>
       </div>
     </div>
@@ -349,23 +336,20 @@ function SuggestedUsersPanel({ users }: { users: UserSuggestion[] }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Main Page (only Quick Search)
+// Main Page
 // ─────────────────────────────────────────────────────────────────
 export default function SearchPage() {
   const router = useRouter()
 
-  // Quick Search states
   const [mode, setModeState] = useState<SearchMode>(() => lastSearchMode)
   const setMode = useCallback((m: SearchMode) => { lastSearchMode = m; setModeState(m) }, [])
   const [query, setQuery] = useState('')
 
-  // Hashtag options
   const [maxPosts,      setMaxPosts]      = useState(60)
   const [includeTop,    setIncludeTop]    = useState(true)
   const [includeRecent, setIncludeRecent] = useState(true)
   const [recentPages,   setRecentPages]   = useState(5)
 
-  // Keyword options
   const [maxHashtags,     setMaxHashtags]     = useState(3)
   const [perHashtagPages, setPerHashtagPages] = useState(1)
   const [kwMaxPosts,      setKwMaxPosts]      = useState(60)
@@ -373,7 +357,6 @@ export default function SearchPage() {
 
   const [showAdvanced, setShowAdvanced] = useState(false)
 
-  // Tiap mode punya key sendiri → hasil hashtag & keyword persist terpisah.
   const searchKey  = mode === 'hashtag' ? SEARCH_KEY_HASHTAG : SEARCH_KEY_KEYWORD
   const task       = useScrapeTask<SearchTaskData>(searchKey)
   const globalBusy = useScrapeBusy()
@@ -382,7 +365,6 @@ export default function SearchPage() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const error = downloadError ?? (task.status === 'error' ? task.error : null)
 
-  // Search ikut global lock: tidak bisa jalan saat ada scraping lain berjalan.
   const disabled    = loading || globalBusy
   const foreignBusy = globalBusy && !loading
 
@@ -391,7 +373,6 @@ export default function SearchPage() {
     setDownloadError(null)
   }
 
-  // UI
   const [sortBy,       setSortBy]       = useState<SortBy>('top')
   const [viewMode,     setViewMode]     = useState<ViewMode>('grid')
   const [filterType,   setFilterType]   = useState<'all' | 'PHOTO' | 'VIDEO' | 'CAROUSEL'>('all')
@@ -399,7 +380,6 @@ export default function SearchPage() {
 
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // ── Quick Search sorted posts ────────────────────────────────
   const sortedPosts = useMemo<SearchPostItem[]>(() => {
     if (!result?.posts) return []
     let posts = [...result.posts]
@@ -434,18 +414,15 @@ export default function SearchPage() {
     }
   }, [result])
 
-  // ── Handlers ───────────────────────────────────────────────────
   const handleSearch = useCallback(async () => {
     const q = query.trim()
     if (!q) return
-    // Ikut global lock: kalau ada scraping lain berjalan, jangan jalankan.
     if (scrapeStore.isBusy()) return
     setSortBy('top'); setFilterType('all')
 
     const key = mode === 'hashtag' ? SEARCH_KEY_HASHTAG : SEARCH_KEY_KEYWORD
     await scrapeStore.run<SearchTaskData>(
-      key,
-      'search',
+      key, 'search',
       mode === 'hashtag' ? `#${q}` : q,
       async (): Promise<SearchTaskData> => {
         if (mode === 'hashtag') {
@@ -514,19 +491,13 @@ export default function SearchPage() {
   // ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-transparent">
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-20%] left-[-10%] w-[60vw] h-[60vw] rounded-full bg-pink-600/5 blur-[120px]" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-purple-600/5 blur-[120px]" />
-      </div>
-
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
-        {/* ── Header ──────────────────────────────────────────── */}
+        {/* ── Header ── */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-linear-to-br from-pink-500/20 to-purple-500/20
-                            border border-pink-500/20">
-              <Search className="w-5 h-5 text-pink-400" />
+            <div className="p-2 rounded-xl glass">
+              <Search className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
             </div>
             <div>
               <h1 className="text-xl font-bold text-white">Instagram Search</h1>
@@ -535,7 +506,7 @@ export default function SearchPage() {
           </div>
         </div>
 
-        {/* ── Banner: scraping lain sedang berjalan ─────────────── */}
+        {/* ── Banner: scraping lain sedang berjalan ── */}
         {foreignBusy && (
           <div className="flex items-start gap-3 p-4 rounded-xl border border-yellow-500/20 bg-yellow-500/10">
             <Clock className="w-4 h-4 mt-0.5 shrink-0 text-yellow-400 animate-pulse" />
@@ -548,8 +519,8 @@ export default function SearchPage() {
           </div>
         )}
 
-        {/* ── Quick Search Card ────────────────────────────────── */}
-        <div className="rounded-2xl border border-white/8 bg-white/3 backdrop-blur-sm p-5 space-y-4">
+        {/* ── Quick Search Card ── */}
+        <div className="rounded-2xl glass-card p-5 space-y-4">
           {/* Mode toggle */}
           <div className="flex gap-1 p-1 bg-white/5 rounded-xl w-fit">
             {(['hashtag', 'keyword'] as SearchMode[]).map(m => (
@@ -559,14 +530,14 @@ export default function SearchPage() {
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
                             disabled:opacity-50 disabled:cursor-not-allowed
                             ${mode === m
-                              ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
+                              ? 'bg-white/10 text-white border border-white/15'
                               : 'text-white/50 hover:text-white/70'}`}>
                 {m === 'hashtag' ? <><Hash className="w-3.5 h-3.5" /> Hashtag</> : <><Sparkles className="w-3.5 h-3.5" /> Keyword</>}
               </button>
             ))}
           </div>
 
-          {/* Input */}
+          {/* Input + Search button */}
           <div className="flex gap-2">
             <div className="flex-1 relative">
               {mode === 'hashtag'
@@ -579,7 +550,7 @@ export default function SearchPage() {
                 placeholder={mode === 'hashtag' ? 'Ketik hashtag (tanpa #)...' : 'Ketik keyword...'}
                 className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-10 py-3
                            text-sm text-white placeholder:text-white/25 disabled:opacity-50
-                           focus:outline-none focus:border-pink-500/50 focus:bg-white/8 transition-all" />
+                           focus:outline-none focus:border-white/30 focus:bg-white/8 transition-all" />
               {query && (
                 <button onClick={() => { setQuery(''); clearResult() }}
                   className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors">
@@ -588,8 +559,7 @@ export default function SearchPage() {
               )}
             </div>
             <button onClick={handleSearch} disabled={disabled || !query.trim()}
-              className="flex items-center gap-2 px-6 py-3 bg-pink-500/20 border border-pink-500/30
-                         text-pink-300 rounded-xl text-sm font-medium hover:bg-pink-500/30 active:scale-95
+              className="btn-glass flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium
                          disabled:opacity-50 disabled:cursor-not-allowed transition-all">
               {loading ? <Spinner size="sm" /> : <Search className="w-4 h-4" />}
               {loading ? 'Mencari...' : globalBusy ? 'Menunggu...' : 'Cari'}
@@ -671,9 +641,9 @@ export default function SearchPage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-base font-bold text-white">{result.total_fetched} postingan</span>
                   {'hashtag' in result && (
-                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-pink-500/15 border border-pink-500/20 text-xs text-pink-300">
+                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 border border-white/15 text-xs text-white/70">
                       <Hash className="w-3 h-3" />{result.hashtag}
-                      {result.formatted_media_count && <span className="text-pink-300/50">· {result.formatted_media_count}</span>}
+                      {result.formatted_media_count && <span className="text-white/40">· {result.formatted_media_count}</span>}
                     </span>
                   )}
                   {'searched_hashtags' in result && result.searched_hashtags.length > 0 && (
@@ -681,7 +651,7 @@ export default function SearchPage() {
                       {result.searched_hashtags.map(t => {
                         const tagName = typeof t === 'string' ? t : t.hashtag
                         return (
-                          <span key={tagName} className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-pink-500/15 border border-pink-500/20 text-xs text-pink-300">
+                          <span key={tagName} className="flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-white/10 border border-white/15 text-xs text-white/70">
                             <Hash className="w-3 h-3" />{tagName}
                           </span>
                         )
@@ -699,9 +669,7 @@ export default function SearchPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={handleDownloadCsv} disabled={downloading || !sortedPosts.length}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 bg-white/5
-                             text-xs text-white/60 hover:text-white/90 hover:border-white/20
-                             disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                  className="btn-glass text-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
                   {downloading ? <Spinner size="sm" /> : <Download className="w-3.5 h-3.5" />} CSV
                 </button>
                 <div className="flex gap-1 p-1 bg-white/5 rounded-lg">
@@ -726,7 +694,7 @@ export default function SearchPage() {
                 ] as { key: SortBy; label: string; icon: React.ReactNode }[]).map(s => (
                   <button key={s.key} onClick={() => setSortBy(s.key)}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-all
-                                ${sortBy === s.key ? 'bg-pink-500/20 text-pink-300 border border-pink-500/25' : 'text-white/40 hover:text-white/70'}`}>
+                                ${sortBy === s.key ? 'bg-white/10 text-white border border-white/15' : 'text-white/40 hover:text-white/70'}`}>
                     {s.icon}{s.label}
                   </button>
                 ))}
@@ -780,9 +748,8 @@ export default function SearchPage() {
         {/* Empty state */}
         {!loading && !result && !error && (
           <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-            <div className="w-16 h-16 rounded-2xl bg-linear-to-br from-pink-500/20 to-purple-500/20
-                            border border-pink-500/20 flex items-center justify-center">
-              {mode === 'hashtag' ? <Hash className="w-7 h-7 text-pink-400/70" /> : <Sparkles className="w-7 h-7 text-pink-400/70" />}
+            <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center">
+              {mode === 'hashtag' ? <Hash className="w-7 h-7" style={{ color: 'var(--text-secondary)' }} /> : <Sparkles className="w-7 h-7" style={{ color: 'var(--text-secondary)' }} />}
             </div>
             <div className="space-y-1">
               <p className="text-white/50 font-medium text-sm">

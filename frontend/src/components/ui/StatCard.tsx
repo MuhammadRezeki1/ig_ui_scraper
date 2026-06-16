@@ -12,15 +12,15 @@ interface StatCardProps {
   loading?: boolean
 }
 
-const colorMap = {
-  pink:    { bg: 'rgba(225,48,108,0.12)',  border: 'rgba(225,48,108,0.2)',  text: '#E1306C', glow: 'rgba(225,48,108,0.3)' },
-  purple:  { bg: 'rgba(131,58,180,0.12)', border: 'rgba(131,58,180,0.2)', text: '#833AB4', glow: 'rgba(131,58,180,0.3)' },
-  orange:  { bg: 'rgba(247,119,55,0.12)', border: 'rgba(247,119,55,0.2)', text: '#F77737', glow: 'rgba(247,119,55,0.3)' },
-  blue:    { bg: 'rgba(64,93,230,0.12)',  border: 'rgba(64,93,230,0.2)',  text: '#405DE6', glow: 'rgba(64,93,230,0.3)' },
-  green:   { bg: 'rgba(34,197,94,0.12)',  border: 'rgba(34,197,94,0.2)',  text: '#22c55e', glow: 'rgba(34,197,94,0.3)' },
-  yellow:  { bg: 'rgba(252,175,69,0.12)', border: 'rgba(252,175,69,0.2)', text: '#FCAF45', glow: 'rgba(252,175,69,0.3)' },
-  red:     { bg: 'rgba(220,38,38,0.12)',  border: 'rgba(220,38,38,0.2)',  text: '#dc2626', glow: 'rgba(220,38,38,0.3)' },
-  default: { bg: 'rgba(24,24,30,0.03)', border: 'rgba(24,24,30,0.08)', text: 'rgba(24,24,30,0.9)', glow: 'transparent' },
+const colorMap: Record<string, { bg: string; border: string; text: string; glow: string }> = {
+  pink:    { bg: 'rgba(193,53,132,0.08)',  border: 'rgba(193,53,132,0.15)',  text: '#C13584', glow: 'rgba(193,53,132,0.2)' },
+  purple:  { bg: 'rgba(131,58,180,0.08)', border: 'rgba(131,58,180,0.15)', text: '#833AB4', glow: 'rgba(131,58,180,0.2)' },
+  orange:  { bg: 'rgba(247,119,55,0.08)', border: 'rgba(247,119,55,0.15)', text: '#F77737', glow: 'rgba(247,119,55,0.2)' },
+  blue:    { bg: 'rgba(64,93,230,0.08)',  border: 'rgba(64,93,230,0.15)',  text: '#405DE6', glow: 'rgba(64,93,230,0.2)' },
+  green:   { bg: 'rgba(34,197,94,0.08)',  border: 'rgba(34,197,94,0.15)',  text: '#22c55e', glow: 'rgba(34,197,94,0.2)' },
+  yellow:  { bg: 'rgba(252,175,69,0.08)', border: 'rgba(252,175,69,0.15)', text: '#FCAF45', glow: 'rgba(252,175,69,0.2)' },
+  red:     { bg: 'rgba(220,38,38,0.08)',  border: 'rgba(220,38,38,0.15)',  text: '#dc2626', glow: 'rgba(220,38,38,0.2)' },
+  default: { bg: 'var(--glass-bg)', border: 'var(--glass-border)', text: 'var(--text-primary)', glow: 'transparent' },
 }
 
 export function StatCard({ label, value, sub, icon, color = 'default', percentage, loading }: StatCardProps) {
@@ -49,7 +49,7 @@ export function StatCard({ label, value, sub, icon, color = 'default', percentag
 
       <div className="relative">
         <div className="flex items-start justify-between mb-3">
-          <p className="text-xs font-medium text-white/50 uppercase tracking-widest">{label}</p>
+          <p className="text-xs font-medium uppercase tracking-widest" style={{ color: 'var(--text-secondary)' }}>{label}</p>
           {icon && (
             <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: c.glow }}>
               {icon}
@@ -61,7 +61,7 @@ export function StatCard({ label, value, sub, icon, color = 'default', percentag
           {typeof value === 'number' ? value.toLocaleString('id-ID') : value}
         </p>
 
-        {sub && <p className="text-xs text-white/40">{sub}</p>}
+        {sub && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{sub}</p>}
 
         {percentage !== undefined && (
           <div className="mt-3">
@@ -75,7 +75,7 @@ export function StatCard({ label, value, sub, icon, color = 'default', percentag
                 }}
               />
             </div>
-            <p className="text-[11px] text-white/30 mt-1">{percentage.toFixed(1)}%</p>
+            <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>{percentage.toFixed(1)}%</p>
           </div>
         )}
       </div>
